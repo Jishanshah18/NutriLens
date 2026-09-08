@@ -1,0 +1,25 @@
+{
+  "status": "trained",
+  "trained_at": "2026-09-04T18:50:34.559923+00:00",
+  "total_training_samples": 2536,
+  "source_files": [
+    "cleaned_food_nutrients_dataset.csv"
+  ],
+  "nova_classifier": {
+    "model_type": "TF-IDF + Multinomial Logistic Regression",
+    "accuracy": 0.8937,
+    "f1_score": 0.8918,
+    "classes": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "health_score_regressor": {
+    "model_type": "TF-IDF + Ridge Regression",
+    "mae": 7.82,
+    "r2_score": 0.568
+  },
+  "vocabulary_size": 5516
+}
