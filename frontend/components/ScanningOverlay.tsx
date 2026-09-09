@@ -48,21 +48,21 @@ export const ScanningOverlay: React.FC<ScanningOverlayProps> = ({ onComplete, pr
       ])
     ).start();
 
-    // Overall Progress
+    // Overall Progress (Fast-tracked sub-350ms transition)
     Animated.timing(progressVal, {
       toValue: 1,
-      duration: 2600,
+      duration: 300,
       easing: Easing.linear,
       useNativeDriver: false
     }).start();
 
-    // Stage updates
-    const t1 = setTimeout(() => setCurrentStage(1), 600);
-    const t2 = setTimeout(() => setCurrentStage(2), 1300);
-    const t3 = setTimeout(() => setCurrentStage(3), 2000);
+    // Fast stage updates
+    const t1 = setTimeout(() => setCurrentStage(1), 80);
+    const t2 = setTimeout(() => setCurrentStage(2), 160);
+    const t3 = setTimeout(() => setCurrentStage(3), 240);
     const t4 = setTimeout(() => {
       if (onComplete) onComplete();
-    }, 2700);
+    }, 320);
 
     return () => {
       clearTimeout(t1);

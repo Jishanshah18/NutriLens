@@ -21,6 +21,10 @@ class NutritionBreakdown(BaseModel):
     fat_g: Optional[float] = None
     sugar_g: Optional[float] = None
     sodium_mg: Optional[float] = None
+    is_estimated: bool = Field(default=False, description="True if estimated from ingredients; False if extracted from label or verified database")
+    source: Optional[str] = Field(default="Scanned Label", description="Source of nutrition facts (e.g. Scanned Label, OpenFoodFacts Database, or Calculated from Ingredients)")
+    serving_size: Optional[str] = Field(default=None, description="Extracted serving size, e.g. '100g' or '1 bar (35g)'")
+
 
 class AlternativeProduct(BaseModel):
     name: str
@@ -43,10 +47,21 @@ class OcrExtractResponse(BaseModel):
     words_count: int
     success: bool
 
+class PreferenceAudit(BaseModel):
+    allergen_conflicts: List[str] = Field(default_factory=list, description="Allergens that conflict with user allergy profile")
+    allergen_safe_notes: List[str] = Field(default_factory=list, description="Confirmed absence of user allergens")
+    dietary_matches: List[str] = Field(default_factory=list, description="Dietary preferences satisfied (e.g. Vegan, Low Sugar)")
+    dietary_conflicts: List[str] = Field(default_factory=list, description="Dietary preferences violated")
+    goal_alignments: List[str] = Field(default_factory=list, description="Positive alignment with user health goals")
+    goal_warnings: List[str] = Field(default_factory=list, description="Warnings regarding user health goals")
+    is_safe_for_user: bool = True
+
 class AnalyzeResponse(BaseModel):
+    is_food: bool = Field(default=True, description="True if verified as food/beverage; False if non-food or foreign item")
+    rejection_reason: Optional[str] = Field(default=None, description="Explanation if rejected as non-food")
     product_name: Optional[str] = "Scanned Food Product"
-    health_score: int = Field(..., ge=0, le=100, description="Overall health score out of 100")
-    nova_group: Optional[int] = Field(default=4, ge=1, le=4, description="Food processing classification (1-4)")
+    health_score: int = Field(default=0, ge=0, le=100, description="Overall health score out of 100")
+    nova_group: Optional[int] = Field(default=None, description="Food processing classification (1-4)")
     allergen_flags: List[str] = Field(default_factory=list)
     ingredient_risks: List[str] = Field(default_factory=list)
     positive_attributes: List[str] = Field(default_factory=list)
@@ -55,6 +70,8 @@ class AnalyzeResponse(BaseModel):
     healthier_alternatives: List[AlternativeProduct] = Field(default_factory=list)
     personalized_verdict: str
     ocr_text: Optional[str] = None
+    barcode: Optional[str] = None
+    preference_audit: Optional[PreferenceAudit] = None
 
 class ScanHistoryItem(BaseModel):
     id: str

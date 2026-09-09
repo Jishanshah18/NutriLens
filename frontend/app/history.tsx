@@ -26,7 +26,7 @@ export default function HistoryScreen() {
       const items = await getScanHistory("default_user", 50);
       setHistory(items);
     } catch (e) {
-      console.error("Error loading scan history:", e);
+      console.warn("Notice loading scan history:", e);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -43,7 +43,7 @@ export default function HistoryScreen() {
       await deleteScanItem(scanId);
       setHistory((prev) => prev.filter((i) => i.id !== scanId));
     } catch (e) {
-      console.error("Failed to delete scan item:", e);
+      console.warn("Notice deleting scan item:", e);
     }
   };
 

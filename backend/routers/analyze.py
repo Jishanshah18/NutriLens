@@ -60,6 +60,23 @@ async def analyze_image_endpoint(request: AnalyzeImageRequest):
         raise HTTPException(status_code=500, detail=f"Failed to analyze image: {str(e)}")
 
 
+@router.get("/barcode/{barcode}", response_model=AnalyzeResponse)
+async def analyze_barcode_endpoint(barcode: str, user_id: str = "default_user"):
+    """
+    Directly lookup and analyze a food product by its EAN/UPC/GTIN barcode.
+    Evaluates real product nutritional values against user dietary preferences.
+    """
+    try:
+        from services.user_service import get_user_profile
+        profile = get_user_profile(user_id)
+        response = analyze_ingredients(f"Scanned Barcode GTIN: {barcode}", profile)
+        if response.is_food:
+            save_scan_history(response, f"Barcode GTIN: {barcode}", user_id=user_id)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Barcode analysis failed: {str(e)}")
+
+
 @router.get("/alternatives", response_model=List[AlternativeProduct])
 async def get_alternatives(
     category: str = Query("snacks", description="Food category e.g. snacks, drinks, cereals")

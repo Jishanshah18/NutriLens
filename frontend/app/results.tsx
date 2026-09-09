@@ -8,6 +8,14 @@ import { BottomNav } from "../components/BottomNav";
 
 type TabType = "nutrition" | "ingredients" | "insights";
 
+function formatMacro(val: number | null | undefined, unit: string): string {
+  if (val === null || val === undefined || isNaN(val)) {
+    return "--";
+  }
+  const formatted = Number.isInteger(val) ? val.toString() : val.toFixed(1);
+  return `${formatted} ${unit}`;
+}
+
 export default function ResultsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -21,7 +29,7 @@ export default function ResultsScreen() {
       try {
         setData(JSON.parse(params.data));
       } catch (e) {
-        console.error("Error parsing results data params:", e);
+        console.warn("Notice parsing results data params:", e);
       }
     }
   }, [params.data]);
@@ -34,6 +42,205 @@ export default function ResultsScreen() {
     );
   }
 
+  // --- NON-FOOD / UNRECOGNIZED FOREIGN OBJECT SCREEN ---
+  if (data.is_food === false) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg }}>
+        {/* Header */}
+        <View style={{
+          paddingTop: 44,
+          paddingBottom: 12,
+          paddingHorizontal: 18,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border
+        }}>
+          <TouchableOpacity
+            onPress={() => router.push("/scanner")}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: colors.card,
+              borderWidth: 1,
+              borderColor: colors.border,
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Text style={{ fontSize: 16, color: colors.text }}>←</Text>
+          </TouchableOpacity>
+
+          <Text style={{ fontSize: 16, fontWeight: "900", color: colors.text }}>
+            Scan Audit Result
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => router.push("/")}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: colors.card,
+              borderWidth: 1,
+              borderColor: colors.border,
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Text style={{ fontSize: 16 }}>🏠</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 40, alignItems: "center" }}>
+          {/* Warning Icon Badge */}
+          <View style={{
+            width: 88,
+            height: 88,
+            borderRadius: 44,
+            backgroundColor: `${colors.crimson}18`,
+            borderWidth: 2,
+            borderColor: colors.crimson,
+            alignItems: "center",
+            justifyContent: "center",
+            marginTop: 20,
+            marginBottom: 16,
+            shadowColor: colors.crimson,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 12
+          }}>
+            <Text style={{ fontSize: 42 }}>🛑</Text>
+          </View>
+
+          {/* Main Title */}
+          <Text style={{ fontSize: 22, fontWeight: "900", color: colors.text, textAlign: "center", marginBottom: 6 }}>
+            Non-Food / Unrecognized Item
+          </Text>
+
+          <View style={{
+            backgroundColor: `${colors.crimson}20`,
+            borderColor: `${colors.crimson}60`,
+            borderWidth: 1,
+            paddingHorizontal: 12,
+            paddingVertical: 4,
+            borderRadius: 12,
+            marginBottom: 20
+          }}>
+            <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "800", textTransform: "uppercase" }}>
+              Database Match Status: No Food Match
+            </Text>
+          </View>
+
+          {/* Rejection Details Card */}
+          <View style={{
+            width: "100%",
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 22,
+            padding: 18,
+            marginBottom: 18,
+            gap: 12
+          }}>
+            <Text style={{ fontSize: 14, fontWeight: "800", color: colors.crimson, textTransform: "uppercase" }}>
+              ⚠️ Why Was This Scanned Item Rejected?
+            </Text>
+            <Text style={{ fontSize: 14, color: colors.text, lineHeight: 20 }}>
+              {data.rejection_reason || data.personalized_verdict}
+            </Text>
+
+            {data.barcode && (
+              <View style={{ backgroundColor: colors.cardAlt, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted }}>SCANNED BARCODE / GTIN:</Text>
+                <Text style={{ fontSize: 15, fontWeight: "900", color: colors.text, marginTop: 2 }}>{data.barcode}</Text>
+                <Text style={{ fontSize: 11, color: colors.amber, marginTop: 4 }}>
+                  Not found in the global OpenFoodFacts registry or local food catalog.
+                </Text>
+              </View>
+            )}
+
+            {data.ocr_text && !data.barcode && (
+              <View style={{ backgroundColor: colors.cardAlt, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted }}>EXTRACTED SCANNED TEXT:</Text>
+                <Text style={{ fontSize: 12, color: colors.text, marginTop: 4, lineHeight: 18 }} numberOfLines={5}>
+                  {data.ocr_text}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Info Card explaining NutriLens purpose */}
+          <View style={{
+            width: "100%",
+            backgroundColor: `${colors.emerald}10`,
+            borderColor: `${colors.emerald}40`,
+            borderWidth: 1,
+            borderRadius: 20,
+            padding: 16,
+            marginBottom: 24,
+            flexDirection: "row",
+            gap: 12,
+            alignItems: "flex-start"
+          }}>
+            <Text style={{ fontSize: 22 }}>💡</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.emerald, fontSize: 13, fontWeight: "800", marginBottom: 2 }}>
+                What can NutriLens scan?
+              </Text>
+              <Text style={{ color: colors.textMuted, fontSize: 12, lineHeight: 18 }}>
+                NutriLens analyzes packaged foods, beverages, snacks, and nutrition facts labels. Non-food items (electronics, hardware, apparel, receipts) or unlisted barcodes cannot be evaluated for health or nutrition.
+              </Text>
+            </View>
+          </View>
+
+          {/* Action Buttons */}
+          <View style={{ width: "100%", gap: 12 }}>
+            <TouchableOpacity
+              onPress={() => router.push("/scanner")}
+              style={{
+                backgroundColor: colors.emerald,
+                borderRadius: 18,
+                paddingVertical: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                shadowColor: colors.emerald,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8
+              }}
+            >
+              <Text style={{ color: "#FFF", fontSize: 15, fontWeight: "900" }}>
+                📸 Scan a Food Item or Label
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push("/")}
+              style={{
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 18,
+                paddingVertical: 14,
+                alignItems: "center",
+                justifyContent: "center"
+              }}
+            >
+              <Text style={{ color: colors.text, fontSize: 14, fontWeight: "800" }}>
+                🏠 Back to Dashboard
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+        <BottomNav />
+      </View>
+    );
+  }
+
+  // --- VERIFIED FOOD PRODUCT SCREEN ---
   const isClean = data.health_score >= 80;
   const isModerate = data.health_score >= 50 && data.health_score < 80;
   const scoreColor = isClean ? colors.emerald : isModerate ? colors.amber : colors.crimson;
@@ -194,6 +401,125 @@ export default function ResultsScreen() {
           </View>
         </View>
 
+        {/* Personalized User Profile Match & Dietary Audit Card */}
+        {data.preference_audit && (
+          <View style={{
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 24,
+            padding: 18,
+            marginBottom: 16,
+            gap: 12
+          }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ fontSize: 20 }}>👤</Text>
+                <Text style={{ fontSize: 15, fontWeight: "900", color: colors.text }}>
+                  Personalized Profile Match
+                </Text>
+              </View>
+              <View style={{
+                backgroundColor: data.preference_audit.is_safe_for_user ? `${colors.emerald}20` : `${colors.crimson}20`,
+                borderColor: data.preference_audit.is_safe_for_user ? colors.emerald : colors.crimson,
+                borderWidth: 1,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 12
+              }}>
+                <Text style={{
+                  color: data.preference_audit.is_safe_for_user ? colors.emerald : colors.crimson,
+                  fontSize: 11,
+                  fontWeight: "900"
+                }}>
+                  {data.preference_audit.is_safe_for_user ? "✓ Profile Aligned" : "⚠️ Conflict Detected"}
+                </Text>
+              </View>
+            </View>
+
+            {/* Allergen Audit Details */}
+            {data.preference_audit.allergen_conflicts && data.preference_audit.allergen_conflicts.length > 0 && (
+              <View style={{
+                backgroundColor: `${colors.crimson}15`,
+                borderColor: colors.crimson,
+                borderWidth: 1,
+                borderRadius: 14,
+                padding: 12,
+                flexDirection: "row",
+                gap: 10,
+                alignItems: "center"
+              }}>
+                <Text style={{ fontSize: 20 }}>🚨</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.crimson, fontSize: 13, fontWeight: "800" }}>
+                    Allergen Alert: Contains {data.preference_audit.allergen_conflicts.join(", ")}
+                  </Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>
+                    Directly conflicts with your saved allergy profile.
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {data.preference_audit.allergen_safe_notes && data.preference_audit.allergen_safe_notes.length > 0 && (
+              <View style={{
+                backgroundColor: `${colors.emerald}10`,
+                borderColor: `${colors.emerald}30`,
+                borderWidth: 1,
+                borderRadius: 14,
+                padding: 10,
+                flexDirection: "row",
+                gap: 8,
+                alignItems: "center"
+              }}>
+                <Text style={{ fontSize: 16 }}>🛡️</Text>
+                <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "700", flex: 1 }}>
+                  {data.preference_audit.allergen_safe_notes[0]}
+                </Text>
+              </View>
+            )}
+
+            {/* Dietary Preference Matches / Conflicts */}
+            {(data.preference_audit.dietary_matches.length > 0 || data.preference_audit.dietary_conflicts.length > 0) && (
+              <View style={{ gap: 6 }}>
+                {data.preference_audit.dietary_matches.map((match, idx) => (
+                  <View key={`match-${idx}`} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={{ color: colors.emerald, fontSize: 14 }}>✓</Text>
+                    <Text style={{ color: colors.text, fontSize: 12, fontWeight: "600" }}>{match}</Text>
+                  </View>
+                ))}
+                {data.preference_audit.dietary_conflicts.map((conf, idx) => (
+                  <View key={`conf-${idx}`} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={{ color: colors.amber, fontSize: 14 }}>⚠️</Text>
+                    <Text style={{ color: colors.amber, fontSize: 12, fontWeight: "700" }}>{conf}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Health Goals Alignments & Advisories */}
+            {(data.preference_audit.goal_alignments.length > 0 || data.preference_audit.goal_warnings.length > 0) && (
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, gap: 6 }}>
+                <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted, textTransform: "uppercase" }}>
+                  Health Goals Evaluation
+                </Text>
+                {data.preference_audit.goal_alignments.map((goal, idx) => (
+                  <View key={`goal-align-${idx}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+                    <Text style={{ color: colors.emerald, fontSize: 13 }}>🎯</Text>
+                    <Text style={{ color: colors.text, fontSize: 12, flex: 1, lineHeight: 18 }}>{goal}</Text>
+                  </View>
+                ))}
+                {data.preference_audit.goal_warnings.map((warn, idx) => (
+                  <View key={`goal-warn-${idx}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+                    <Text style={{ color: colors.amber, fontSize: 13 }}>⚡</Text>
+                    <Text style={{ color: colors.amber, fontSize: 12, flex: 1, lineHeight: 18 }}>{warn}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Critical Allergen Alert Banner */}
         {data.allergen_flags && data.allergen_flags.length > 0 && (
           <View style={{
@@ -307,18 +633,44 @@ export default function ResultsScreen() {
             padding: 18,
             gap: 14
           }}>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: colors.text }}>
-              Estimated Macronutrients per Serving
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <View>
+                <Text style={{ fontSize: 16, fontWeight: "800", color: colors.text }}>
+                  {data.nutrition_estimate?.is_estimated ? "Estimated Macronutrients" : "Nutrition Facts per Serving"}
+                </Text>
+                {data.nutrition_estimate?.serving_size ? (
+                  <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "600", marginTop: 2 }}>
+                    Serving Size: {data.nutrition_estimate.serving_size}
+                  </Text>
+                ) : null}
+              </View>
+
+              <View style={{
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 8,
+                backgroundColor: data.nutrition_estimate?.is_estimated ? "rgba(245, 158, 11, 0.12)" : "rgba(16, 185, 129, 0.12)",
+                borderWidth: 1,
+                borderColor: data.nutrition_estimate?.is_estimated ? colors.amber : colors.emerald,
+              }}>
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: "800",
+                  color: data.nutrition_estimate?.is_estimated ? colors.amber : colors.emerald
+                }}>
+                  {data.nutrition_estimate?.is_estimated ? "⚠️ Calculated Estimate" : `✅ ${data.nutrition_estimate?.source || "Scanned Label"}`}
+                </Text>
+              </View>
+            </View>
 
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
               {[
-                { label: "Calories", val: `${data.nutrition_estimate?.calories || 180} kcal`, color: colors.blue },
-                { label: "Clean Protein", val: `${data.nutrition_estimate?.protein_g || 4.2} g`, color: colors.emerald },
-                { label: "Carbohydrates", val: `${data.nutrition_estimate?.carbs_g || 24} g`, color: colors.amber },
-                { label: "Total Fat", val: `${data.nutrition_estimate?.fat_g || 7.5} g`, color: colors.crimson },
-                { label: "Sugars", val: `${data.nutrition_estimate?.sugar_g || 11} g`, color: colors.amber },
-                { label: "Sodium", val: `${data.nutrition_estimate?.sodium_mg || 340} mg`, color: colors.blue }
+                { label: "Calories", val: formatMacro(data.nutrition_estimate?.calories, "kcal"), color: colors.blue },
+                { label: "Clean Protein", val: formatMacro(data.nutrition_estimate?.protein_g, "g"), color: colors.emerald },
+                { label: "Carbohydrates", val: formatMacro(data.nutrition_estimate?.carbs_g, "g"), color: colors.amber },
+                { label: "Total Fat", val: formatMacro(data.nutrition_estimate?.fat_g, "g"), color: colors.crimson },
+                { label: "Sugars", val: formatMacro(data.nutrition_estimate?.sugar_g, "g"), color: colors.amber },
+                { label: "Sodium", val: formatMacro(data.nutrition_estimate?.sodium_mg, "mg"), color: colors.blue }
               ].map((item) => (
                 <View
                   key={item.label}
@@ -336,6 +688,32 @@ export default function ResultsScreen() {
                 </View>
               ))}
             </View>
+
+            {data.nutrition_estimate?.is_estimated ? (
+              <View style={{
+                backgroundColor: "rgba(245, 158, 11, 0.08)",
+                borderColor: "rgba(245, 158, 11, 0.25)",
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 10
+              }}>
+                <Text style={{ fontSize: 11, color: colors.textMuted, lineHeight: 16 }}>
+                  ℹ️ <Text style={{ fontWeight: "700", color: colors.text }}>Ingredient-Derived Estimate:</Text> No printed nutrition facts table was detected on this packaging. These figures are calculated based on the listed ingredients.
+                </Text>
+              </View>
+            ) : (
+              <View style={{
+                backgroundColor: "rgba(16, 185, 129, 0.08)",
+                borderColor: "rgba(16, 185, 129, 0.25)",
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 10
+              }}>
+                <Text style={{ fontSize: 11, color: colors.textMuted, lineHeight: 16 }}>
+                  ✅ <Text style={{ fontWeight: "700", color: colors.text }}>Verified Product Data:</Text> Values extracted directly from the scanned product packaging label.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 

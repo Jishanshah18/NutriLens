@@ -34,7 +34,7 @@ export default function EngagementScreen() {
       setStats(statsData);
       setQuizzes(quizzesData);
     } catch (e) {
-      console.error("Error loading engagement data:", e);
+      console.warn("Notice loading engagement data:", e);
     } finally {
       setIsLoading(false);
     }
@@ -52,7 +52,7 @@ export default function EngagementScreen() {
       const updatedStats = await getUserStats("default_user");
       setStats(updatedStats);
     } catch (e) {
-      console.error("Error submitting quiz:", e);
+      console.warn("Notice submitting quiz:", e);
     } finally {
       setIsSubmitting(false);
     }

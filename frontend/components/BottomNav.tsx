@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Platform } from "react-native";
+import { View, Text, TouchableOpacity, Platform, Image } from "react-native";
 import { useRouter, usePathname } from "expo-router";
 import { useTheme } from "../lib/ThemeContext";
 
@@ -91,7 +91,11 @@ export const BottomNav: React.FC = () => {
                   borderWidth: 1,
                   borderColor: "rgba(255, 255, 255, 0.4)"
                 }}>
-                  <Text style={{ fontSize: 28 }}>📷</Text>
+                  <Image
+                    source={require("../assets/camera-icon-white.png")}
+                    style={{ width: 26, height: 26 }}
+                    resizeMode="contain"
+                  />
                 </View>
               </TouchableOpacity>
 

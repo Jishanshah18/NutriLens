@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: nutrilens-backend
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: SUPABASE_URL
+        value: https://llbithcfnwzgwubfuhfb.supabase.co
+      - key: SUPABASE_KEY
+        value: sb_publishable_N-nO07iLpQAHtpwAj0oVqQ_K7yKQ0O8

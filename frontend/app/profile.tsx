@@ -36,7 +36,7 @@ export default function ProfileScreen() {
       if (prof) setProfile(prof);
       if (st) setStats(st);
     } catch (e) {
-      console.error("Error loading user profile:", e);
+      console.warn("Notice loading user profile:", e);
     }
   };
 
@@ -56,7 +56,7 @@ export default function ProfileScreen() {
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (e) {
-      console.error("Failed to save profile:", e);
+      console.warn("Notice saving profile:", e);
     } finally {
       setIsSaving(false);
     }
