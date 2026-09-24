@@ -4,6 +4,9 @@ from datetime import datetime
 
 class UserProfile(BaseModel):
     user_id: str = "default_user"
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    health_conditions: List[str] = Field(default_factory=list, description="e.g. Diabetes, High Blood Pressure, High Cholesterol, Obesity, Heart-related conditions, Kidney-related conditions, Gluten intolerance, Lactose intolerance")
     dietary_preferences: List[str] = Field(default_factory=list, description="e.g. Vegan, Keto, Gluten-Free, Low-Sodium, Diabetic-Friendly")
     allergies: List[str] = Field(default_factory=list, description="e.g. Peanuts, Lactose, Gluten, Soy, Tree Nuts, Shellfish")
     health_goals: List[str] = Field(default_factory=list, description="e.g. Weight Loss, Muscle Gain, Heart Health, Diabetic Care, Low Sugar")
@@ -21,6 +24,7 @@ class NutritionBreakdown(BaseModel):
     fat_g: Optional[float] = None
     sugar_g: Optional[float] = None
     sodium_mg: Optional[float] = None
+    fiber_g: Optional[float] = None
     is_estimated: bool = Field(default=False, description="True if estimated from ingredients; False if extracted from label or verified database")
     source: Optional[str] = Field(default="Scanned Label", description="Source of nutrition facts (e.g. Scanned Label, OpenFoodFacts Database, or Calculated from Ingredients)")
     serving_size: Optional[str] = Field(default=None, description="Extracted serving size, e.g. '100g' or '1 bar (35g)'")
@@ -30,6 +34,27 @@ class AlternativeProduct(BaseModel):
     name: str
     reason: str
     estimated_health_score: int
+
+class PersonalizedRecommendation(BaseModel):
+    status: str = Field(..., description="Good Choice | Suitable | Moderately Suitable | Limit | Not Recommended")
+    headline: str = Field(..., description="Clear recommendation summary headline")
+    health_conditions_considered: List[str] = Field(default_factory=list)
+    reasons: List[str] = Field(default_factory=list, description="Why this recommendation was made for user's health conditions")
+    key_concerns: List[str] = Field(default_factory=list, description="e.g. High Sugar (16g), High Sodium (420mg)")
+    positive_notes: List[str] = Field(default_factory=list, description="e.g. Good Protein (8g), Good Fiber (4g)")
+    better_alternative: Optional[str] = Field(default=None, description="What to look for instead")
+    data_completeness: str = Field(default="High", description="'High', 'Partial', or 'Low' data completeness rating")
+    missing_nutrients: List[str] = Field(default_factory=list, description="List of unavailable nutrient fields (null != 0)")
+    data_sources: List[str] = Field(default_factory=lambda: ["USDA FoodData Central", "Open Food Facts"], description="Dataset sources")
+    last_verified: str = Field(default="February 2026", description="Data verification timestamp")
+    allergens_safety_note: Optional[str] = Field(
+        default="Always verify allergen and ingredient information on the physical product packaging, especially if you have a severe food allergy.",
+        description="Allergen safety guidance"
+    )
+    medical_disclaimer: str = Field(
+        default="NutriLens provides educational nutrition information and is not a substitute for professional medical advice, diagnosis, or treatment.",
+        description="Medical safety disclaimer"
+    )
 
 class AnalyzeRequest(BaseModel):
     ocr_text: str = Field(..., description="Extracted OCR text from the ingredient label")
@@ -60,6 +85,9 @@ class AnalyzeResponse(BaseModel):
     is_food: bool = Field(default=True, description="True if verified as food/beverage; False if non-food or foreign item")
     rejection_reason: Optional[str] = Field(default=None, description="Explanation if rejected as non-food")
     product_name: Optional[str] = "Scanned Food Product"
+    brand: Optional[str] = None
+    category: Optional[str] = None
+    image_url: Optional[str] = None
     health_score: int = Field(default=0, ge=0, le=100, description="Overall health score out of 100")
     nova_group: Optional[int] = Field(default=None, description="Food processing classification (1-4)")
     allergen_flags: List[str] = Field(default_factory=list)
@@ -69,6 +97,12 @@ class AnalyzeResponse(BaseModel):
     nutrition_estimate: Optional[NutritionBreakdown] = None
     healthier_alternatives: List[AlternativeProduct] = Field(default_factory=list)
     personalized_verdict: str
+    personalized_recommendation: Optional[PersonalizedRecommendation] = None
+    data_completeness: str = Field(default="High", description="Data completeness indicator ('High', 'Partial', 'Low')")
+    missing_nutrients: List[str] = Field(default_factory=list, description="Unavailable nutrients (null != 0)")
+    data_sources: List[str] = Field(default_factory=lambda: ["USDA FoodData Central", "Open Food Facts"], description="Data sources")
+    last_verified: str = Field(default="February 2026", description="Last verified date")
+    allergens_safety_note: Optional[str] = None
     ocr_text: Optional[str] = None
     barcode: Optional[str] = None
     preference_audit: Optional[PreferenceAudit] = None
@@ -119,3 +153,23 @@ class UserStatsResponse(BaseModel):
     xp: int
     level: int
     badges: List[BadgeItem]
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class UserRegisterRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    health_conditions: List[str] = Field(default_factory=list)
+
+class UserAuthResponse(BaseModel):
+    success: bool
+    user_id: str
+    email: str
+    full_name: str
+    token: str = "nutrilens_session_active"
+    message: str
+    profile: UserProfile
+

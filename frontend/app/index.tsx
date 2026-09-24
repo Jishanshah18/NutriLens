@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, ScrollView, RefreshControl, Dimensions } from "react-native";
 import { useRouter } from "expo-router";
-import { getUserProfile, getUserStats, getScanHistory, UserProfile, UserStatsResponse, ScanHistoryItem } from "../lib/api";
+import {
+  getUserProfile,
+  getUserStats,
+  getScanHistory,
+  getActiveUserId,
+  getSavedUserProfile,
+  UserProfile,
+  UserStatsResponse,
+  ScanHistoryItem
+} from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
 import { ScoreRing } from "../components/ScoreRing";
 import { WeeklyChart } from "../components/WeeklyChart";
@@ -29,12 +38,15 @@ export default function HomeScreen() {
 
   const loadHomeData = async () => {
     try {
+      const activeId = await getActiveUserId();
+      const saved = await getSavedUserProfile();
       const [prof, st, hist] = await Promise.all([
-        getUserProfile("default_user").catch(() => null),
-        getUserStats("default_user").catch(() => null),
-        getScanHistory("default_user", 6).catch(() => [])
+        getUserProfile(activeId).catch(() => null),
+        getUserStats(activeId).catch(() => null),
+        getScanHistory(activeId, 6).catch(() => [])
       ]);
-      if (prof) setProfile(prof);
+      const currentProfile = saved || prof;
+      if (currentProfile) setProfile(currentProfile);
       if (st) setStats(st);
       if (hist) setRecentScans(hist);
     } catch (e) {
@@ -74,18 +86,51 @@ export default function HomeScreen() {
         <View style={{
           paddingHorizontal: 20,
           paddingTop: 44,
-          paddingBottom: 20,
+          paddingBottom: 16,
           flexDirection: "row",
           justifyContent: "space-between",
-          alignItems: "center"
+          alignItems: "flex-start"
         }}>
-          <View>
+          <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textMuted, textTransform: "uppercase", letterSpacing: 1 }}>
               {getGreeting()},
             </Text>
-            <Text style={{ fontSize: 26, fontWeight: "900", color: colors.text, letterSpacing: -0.5 }}>
-              Jishan Ahmed 👋
+            <Text style={{ fontSize: 24, fontWeight: "900", color: colors.text, letterSpacing: -0.5, marginTop: 2 }}>
+              {profile?.full_name || "Jishan Ahmed"} 👋
             </Text>
+
+            {/* Active Conditions Pill Strip */}
+            {profile?.health_conditions && profile.health_conditions.length > 0 ? (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {profile.health_conditions.map((cond) => (
+                  <TouchableOpacity
+                    key={cond}
+                    onPress={() => router.push("/profile" as any)}
+                    style={{
+                      backgroundColor: `${colors.emerald}15`,
+                      borderColor: `${colors.emerald}50`,
+                      borderWidth: 1,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 10
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: colors.emerald }}>
+                      🛡️ {cond}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => router.push("/profile" as any)}
+                style={{ marginTop: 6 }}
+              >
+                <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "600" }}>
+                  + Add health conditions in profile
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Quick Streak & XP Pill */}

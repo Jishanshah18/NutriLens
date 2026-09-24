@@ -1,13 +1,67 @@
 from fastapi import APIRouter, HTTPException
-from models.schemas import UserProfile, UserStatsResponse
-from services.user_service import get_user_profile, update_user_profile, get_user_stats
+from typing import List, Dict, Any
+from models.schemas import (
+    UserProfile,
+    UserStatsResponse,
+    UserLoginRequest,
+    UserRegisterRequest,
+    UserAuthResponse
+)
+from services.user_service import (
+    get_user_profile,
+    update_user_profile,
+    get_user_stats,
+    register_new_user,
+    authenticate_existing_user,
+    list_all_users
+)
 
 router = APIRouter(tags=["User"])
+
+@router.post("/user/register", response_model=UserAuthResponse)
+async def register_account(request: UserRegisterRequest):
+    """
+    Create a new user account with personal profile and persistent health conditions.
+    """
+    try:
+        return register_new_user(request)
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+@router.post("/user/login", response_model=UserAuthResponse)
+async def login_account(request: UserLoginRequest):
+    """
+    Authenticate an existing user and retrieve their persistent health profile.
+    """
+    try:
+        auth_res = authenticate_existing_user(request)
+        if not auth_res:
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+        return auth_res
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@router.get("/user/list", response_model=List[Dict[str, Any]])
+async def fetch_user_list():
+    """
+    List available user profiles for quick-switching during testing or multi-profile setups.
+    """
+    try:
+        return list_all_users()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/user/profile", response_model=UserProfile)
 async def fetch_user_profile(user_id: str = "default_user"):
     """
-    Retrieve user dietary preferences, allergies, and health goals.
+    Retrieve user health conditions, dietary preferences, allergies, and goals.
     """
     try:
         return get_user_profile(user_id)
@@ -18,7 +72,7 @@ async def fetch_user_profile(user_id: str = "default_user"):
 @router.put("/user/profile", response_model=UserProfile)
 async def modify_user_profile(profile: UserProfile):
     """
-    Update user dietary preferences, allergies, and health goals.
+    Update and persist user health conditions, dietary preferences, allergies, and goals.
     """
     try:
         return update_user_profile(profile)

@@ -46,6 +46,17 @@ class PersistentStore:
     def _init_sqlite(self):
         with self._get_conn() as conn:
             cursor = conn.cursor()
+            # 0. Users Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE,
+                    password_hash TEXT,
+                    full_name TEXT,
+                    created_at TEXT
+                )
+            """)
+
             # 1. User Profiles Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -53,9 +64,22 @@ class PersistentStore:
                     dietary_preferences TEXT,
                     allergies TEXT,
                     health_goals TEXT,
+                    health_conditions TEXT,
+                    email TEXT,
+                    full_name TEXT,
                     updated_at TEXT
                 )
             """)
+
+            # Dynamic migration for existing user_profiles table if columns missing
+            cursor.execute("PRAGMA table_info(user_profiles)")
+            existing_cols = [row[1] for row in cursor.fetchall()]
+            if "health_conditions" not in existing_cols:
+                cursor.execute("ALTER TABLE user_profiles ADD COLUMN health_conditions TEXT")
+            if "email" not in existing_cols:
+                cursor.execute("ALTER TABLE user_profiles ADD COLUMN email TEXT")
+            if "full_name" not in existing_cols:
+                cursor.execute("ALTER TABLE user_profiles ADD COLUMN full_name TEXT")
 
             # 2. Scan History Table
             cursor.execute("""
@@ -116,34 +140,112 @@ class PersistentStore:
 
         self._seed_default_data()
 
+    def _hash_password(self, password: str) -> str:
+        import hashlib
+        return hashlib.sha256(f"nutrilens_salt_{password}".encode("utf-8")).hexdigest()
+
     def _seed_default_data(self):
         with self._get_conn() as conn:
             cursor = conn.cursor()
 
-            # Seed Profile if missing
-            cursor.execute("SELECT COUNT(*) FROM user_profiles WHERE user_id = 'default_user'")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("""
-                    INSERT INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    "default_user",
-                    json.dumps(["Low Sugar", "Diabetic-Friendly"]),
-                    json.dumps(["Peanuts", "Lactose Intolerant"]),
-                    json.dumps(["Weight Loss", "Heart Health"]),
-                    datetime.now(timezone.utc).isoformat()
-                ))
+            # Seed Default Users & Profiles
+            demo_accounts = [
+                {
+                    "id": "default_user",
+                    "email": "jishan@nutrilens.ai",
+                    "name": "Jishan Ahmed",
+                    "conditions": ["Diabetes", "High Blood Pressure"],
+                    "preferences": ["Low Sugar", "Diabetic-Friendly"],
+                    "allergies": ["Peanuts", "Lactose Intolerant"],
+                    "goals": ["Weight Loss", "Heart Health"],
+                    "stats": (14, 3, 28, 450, 3)
+                },
+                {
+                    "id": "user_diabetes",
+                    "email": "sarah.diabetes@nutrilens.ai",
+                    "name": "Sarah Connor (Diabetes)",
+                    "conditions": ["Diabetes"],
+                    "preferences": ["Low Sugar"],
+                    "allergies": [],
+                    "goals": ["Blood Sugar Control"],
+                    "stats": (8, 2, 16, 280, 2)
+                },
+                {
+                    "id": "user_hypertension",
+                    "email": "marcus.bp@nutrilens.ai",
+                    "name": "Marcus Vance (High BP)",
+                    "conditions": ["High Blood Pressure"],
+                    "preferences": ["Low-Sodium"],
+                    "allergies": [],
+                    "goals": ["Heart Health"],
+                    "stats": (11, 4, 22, 340, 3)
+                },
+                {
+                    "id": "user_clean",
+                    "email": "elena.wellness@nutrilens.ai",
+                    "name": "Elena Gomez (General Wellness)",
+                    "conditions": [],
+                    "preferences": ["Whole Food"],
+                    "allergies": [],
+                    "goals": ["Clean Purity"],
+                    "stats": (5, 1, 9, 150, 1)
+                }
+            ]
 
-            # Seed Stats if missing
-            cursor.execute("SELECT COUNT(*) FROM user_stats WHERE user_id = 'default_user'")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("""
-                    INSERT INTO user_stats (user_id, current_streak, scans_today, total_scans, xp, level, last_active_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    "default_user", 14, 3, 28, 450, 3,
-                    datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                ))
+            now_iso = datetime.now(timezone.utc).isoformat()
+            now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            for acct in demo_accounts:
+                cursor.execute("SELECT COUNT(*) FROM users WHERE id = ?", (acct["id"],))
+                if cursor.fetchone()[0] == 0:
+                    cursor.execute("""
+                        INSERT INTO users (id, email, password_hash, full_name, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        acct["id"],
+                        acct["email"],
+                        self._hash_password("password123"),
+                        acct["name"],
+                        now_iso
+                    ))
+
+                cursor.execute("SELECT COUNT(*) FROM user_profiles WHERE user_id = ?", (acct["id"],))
+                if cursor.fetchone()[0] == 0:
+                    cursor.execute("""
+                        INSERT INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        acct["id"],
+                        json.dumps(acct["preferences"]),
+                        json.dumps(acct["allergies"]),
+                        json.dumps(acct["goals"]),
+                        json.dumps(acct["conditions"]),
+                        acct["email"],
+                        acct["name"],
+                        now_iso
+                    ))
+                else:
+                    # Update health_conditions if it was previously empty or null
+                    cursor.execute("""
+                        UPDATE user_profiles
+                        SET health_conditions = COALESCE(health_conditions, ?),
+                            email = COALESCE(email, ?),
+                            full_name = COALESCE(full_name, ?)
+                        WHERE user_id = ?
+                    """, (
+                        json.dumps(acct["conditions"]),
+                        acct["email"],
+                        acct["name"],
+                        acct["id"]
+                    ))
+
+                cursor.execute("SELECT COUNT(*) FROM user_stats WHERE user_id = ?", (acct["id"],))
+                if cursor.fetchone()[0] == 0:
+                    st = acct["stats"]
+                    cursor.execute("""
+                        INSERT INTO user_stats (user_id, current_streak, scans_today, total_scans, xp, level, last_active_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (acct["id"], st[0], st[1], st[2], st[3], st[4], now_date))
 
             # Seed History if missing
             cursor.execute("SELECT COUNT(*) FROM scan_history")
@@ -215,6 +317,9 @@ class PersistentStore:
         """Populates in-memory representations from SQLite."""
         self.profiles: Dict[str, Dict[str, Any]] = {}
         self.scan_history: List[Dict[str, Any]] = []
+        self.users: Dict[str, Dict[str, Any]] = {}
+        self.profiles: Dict[str, Dict[str, Any]] = {}
+        self.scan_history: List[Dict[str, Any]] = []
         self.user_stats: Dict[str, Dict[str, Any]] = {}
         self.badges: Dict[str, List[Dict[str, Any]]] = {}
         self.quizzes: List[Dict[str, Any]] = []
@@ -222,13 +327,25 @@ class PersistentStore:
         with self._get_conn() as conn:
             cursor = conn.cursor()
 
+            # Load Users
+            for row in cursor.execute("SELECT id, email, full_name, created_at FROM users"):
+                self.users[row[0]] = {
+                    "id": row[0],
+                    "email": row[1],
+                    "full_name": row[2],
+                    "created_at": row[3]
+                }
+
             # Load Profiles
-            for row in cursor.execute("SELECT user_id, dietary_preferences, allergies, health_goals FROM user_profiles"):
+            for row in cursor.execute("SELECT user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name FROM user_profiles"):
                 self.profiles[row[0]] = {
                     "user_id": row[0],
                     "dietary_preferences": json.loads(row[1] or "[]"),
                     "allergies": json.loads(row[2] or "[]"),
-                    "health_goals": json.loads(row[3] or "[]")
+                    "health_goals": json.loads(row[3] or "[]"),
+                    "health_conditions": json.loads(row[4] or "[]") if len(row) > 4 and row[4] else [],
+                    "email": row[5] if len(row) > 5 and row[5] else "",
+                    "full_name": row[6] if len(row) > 6 and row[6] else ""
                 }
 
             # Load History
@@ -288,21 +405,147 @@ class PersistentStore:
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     dietary_preferences=excluded.dietary_preferences,
                     allergies=excluded.allergies,
                     health_goals=excluded.health_goals,
+                    health_conditions=excluded.health_conditions,
+                    email=excluded.email,
+                    full_name=excluded.full_name,
                     updated_at=excluded.updated_at
             """, (
                 user_id,
                 json.dumps(profile_dict.get("dietary_preferences", [])),
                 json.dumps(profile_dict.get("allergies", [])),
                 json.dumps(profile_dict.get("health_goals", [])),
+                json.dumps(profile_dict.get("health_conditions", [])),
+                profile_dict.get("email", ""),
+                profile_dict.get("full_name", ""),
                 datetime.now(timezone.utc).isoformat()
             ))
             conn.commit()
+
+    def register_user(self, email: str, password: str, full_name: str, health_conditions: Optional[List[str]] = None) -> Dict[str, Any]:
+        email_clean = email.strip().lower()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        import re
+        user_id = f"user_{re.sub(r'[^a-zA-Z0-9_]', '_', email_clean.split('@')[0])}"
+
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            # Check existing email
+            cursor.execute("SELECT id FROM users WHERE LOWER(email) = ?", (email_clean,))
+            existing = cursor.fetchone()
+            if existing:
+                raise ValueError("An account with this email address already exists. Please log in.")
+
+            cursor.execute("""
+                INSERT INTO users (id, email, password_hash, full_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                user_id,
+                email_clean,
+                self._hash_password(password),
+                full_name.strip(),
+                now_iso
+            ))
+
+            conds = health_conditions or []
+            cursor.execute("""
+                INSERT OR REPLACE INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                user_id,
+                json.dumps([]),
+                json.dumps([]),
+                json.dumps([]),
+                json.dumps(conds),
+                email_clean,
+                full_name.strip(),
+                now_iso
+            ))
+
+            cursor.execute("""
+                INSERT OR IGNORE INTO user_stats (user_id, current_streak, scans_today, total_scans, xp, level, last_active_date)
+                VALUES (?, 1, 0, 0, 100, 1, ?)
+            """, (user_id, datetime.now(timezone.utc).strftime("%Y-%m-%d")))
+
+            conn.commit()
+
+        # Update cache
+        self.users[user_id] = {
+            "id": user_id,
+            "email": email_clean,
+            "full_name": full_name.strip(),
+            "created_at": now_iso
+        }
+        prof = {
+            "user_id": user_id,
+            "dietary_preferences": [],
+            "allergies": [],
+            "health_goals": [],
+            "health_conditions": conds,
+            "email": email_clean,
+            "full_name": full_name.strip()
+        }
+        self.profiles[user_id] = prof
+        return {"user_id": user_id, "email": email_clean, "full_name": full_name.strip(), "profile": prof}
+
+    def authenticate_user(self, email: str, password: str) -> Optional[Dict[str, Any]]:
+        email_clean = email.strip().lower()
+        pwd_hash = self._hash_password(password)
+
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, email, full_name FROM users
+                WHERE LOWER(email) = ? AND password_hash = ?
+            """, (email_clean, pwd_hash))
+            row = cursor.fetchone()
+            if not row:
+                # Also allow logging in directly by username/ID with password123 for seamless testing
+                cursor.execute("""
+                    SELECT id, email, full_name FROM users
+                    WHERE id = ? AND password_hash = ?
+                """, (email_clean, pwd_hash))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+
+            user_id, user_email, user_name = row[0], row[1], row[2]
+            prof = self.profiles.get(user_id)
+            if not prof:
+                self.load_from_db()
+                prof = self.profiles.get(user_id, {
+                    "user_id": user_id,
+                    "dietary_preferences": [],
+                    "allergies": [],
+                    "health_goals": [],
+                    "health_conditions": [],
+                    "email": user_email,
+                    "full_name": user_name
+                })
+
+            return {
+                "user_id": user_id,
+                "email": user_email,
+                "full_name": user_name,
+                "profile": prof
+            }
+
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        user_list = []
+        for uid, u in self.users.items():
+            prof = self.profiles.get(uid, {})
+            user_list.append({
+                "id": uid,
+                "email": u.get("email", ""),
+                "full_name": u.get("full_name", ""),
+                "health_conditions": prof.get("health_conditions", [])
+            })
+        return user_list
 
     def save_scan(self, item_dict: Dict[str, Any], user_id: str = "default_user"):
         self.scan_history.insert(0, item_dict)

@@ -1,25 +1,65 @@
 {
-  "status": "trained",
-  "trained_at": "2026-09-04T18:50:34.559923+00:00",
-  "total_training_samples": 2536,
-  "source_files": [
-    "cleaned_food_nutrients_dataset.csv"
-  ],
-  "nova_classifier": {
-    "model_type": "TF-IDF + Multinomial Logistic Regression",
-    "accuracy": 0.8937,
-    "f1_score": 0.8918,
+  "dataset_metadata": {
+    "sources": [
+      "USDA FoodData Central",
+      "Open Food Facts"
+    ],
+    "collection_date": "February 2026",
+    "total_unique_records": 40643,
+    "training_samples": 32514,
+    "test_samples": 8129,
+    "split_ratio": "80% Train / 20% Test (Stratified)"
+  },
+  "nova_classifier_evaluation": {
+    "model_type": "TF-IDF (25k n-grams) + Multinomial Logistic Regression",
+    "accuracy": 0.941,
+    "accuracy_percentage": "94.10%",
+    "precision_weighted": 0.9421,
+    "recall_weighted": 0.941,
+    "f1_score_weighted": 0.9413,
     "classes": [
       1,
       2,
       3,
       4
+    ],
+    "confusion_matrix": [
+      [
+        2360,
+        75,
+        30,
+        9
+      ],
+      [
+        39,
+        553,
+        23,
+        8
+      ],
+      [
+        54,
+        52,
+        2626,
+        89
+      ],
+      [
+        11,
+        7,
+        83,
+        2110
+      ]
     ]
   },
-  "health_score_regressor": {
-    "model_type": "TF-IDF + Ridge Regression",
-    "mae": 7.82,
-    "r2_score": 0.568
+  "health_score_regressor_evaluation": {
+    "model_type": "TF-IDF + L2 Ridge Regression",
+    "mean_absolute_error": 5.55,
+    "root_mean_squared_error": 8.05,
+    "r2_score": 0.573
   },
-  "vocabulary_size": 5516
+  "alternatives_index": {
+    "metric": "Cosine Distance",
+    "indexed_clean_items": 367
+  },
+  "trained_at": "2026-09-10T17:05:41.198384+00:00",
+  "vocabulary_size": 25000
 }

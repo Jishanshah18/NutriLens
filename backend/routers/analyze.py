@@ -77,6 +77,38 @@ async def analyze_barcode_endpoint(barcode: str, user_id: str = "default_user"):
         raise HTTPException(status_code=500, detail=f"Barcode analysis failed: {str(e)}")
 
 
+@router.post("/barcode/scan-image", response_model=AnalyzeResponse)
+async def analyze_barcode_image_endpoint(request: AnalyzeImageRequest):
+    """
+    Decodes barcode from an uploaded gallery image and performs nutritional analysis.
+    """
+    try:
+        from services.barcode_service import decode_barcode_from_image
+        from services.user_service import get_user_profile
+
+        barcode = decode_barcode_from_image(request.image_base64)
+        profile = request.user_profile
+        user_id = profile.user_id if profile and profile.user_id else "default_user"
+        if not profile:
+            profile = get_user_profile(user_id)
+
+        if not barcode:
+            return AnalyzeResponse(
+                is_food=False,
+                rejection_reason="No readable barcode lines or numbers could be detected in this photo. Please ensure the barcode is clearly visible, or enter the code manually below.",
+                product_name="Barcode Not Detected",
+                personalized_verdict="⚠️ Barcode Not Found: Please select a clear, well-lit photo of the barcode or enter the numbers directly.",
+                health_score=0
+            )
+
+        response = analyze_ingredients(f"Scanned Barcode GTIN: {barcode}", profile)
+        if response.is_food:
+            save_scan_history(response, f"Barcode GTIN: {barcode}", user_id=user_id)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Barcode image analysis failed: {str(e)}")
+
+
 @router.get("/alternatives", response_model=List[AlternativeProduct])
 async def get_alternatives(
     category: str = Query("snacks", description="Food category e.g. snacks, drinks, cereals")

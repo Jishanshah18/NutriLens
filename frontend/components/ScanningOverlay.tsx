@@ -5,24 +5,38 @@ import { useTheme } from "../lib/ThemeContext";
 interface ScanningOverlayProps {
   onComplete?: () => void;
   productTitle?: string;
+  healthConditions?: string[];
+  activeStageIndex?: number;
 }
 
-const STAGES = [
-  { id: 1, title: "OCR Label Extraction", desc: "Recognizing ingredient text and token spaces..." },
-  { id: 2, title: "Processing Level Audit", desc: "Evaluating whole food vs ultra-processed formulation..." },
-  { id: 3, title: "Toxicological E-Code Scan", desc: "Screening 50+ additives and allergen triggers..." },
-  { id: 4, title: "Personalized AI Verdict", desc: "Matching profile goals and cleaner alternatives..." }
+export const STAGES = [
+  { id: 1, key: "SCANNING", title: "Scanning Food Label", desc: "Detecting packaging, barcode, and typography..." },
+  { id: 2, key: "PROCESSING", title: "Processing Nutrition Tokens", desc: "Extracting macros, calories, sodium, and ingredients..." },
+  { id: 3, key: "ANALYZING", title: "Analyzing Health Conditions", desc: "Evaluating clinical thresholds against your personal profile..." },
+  { id: 4, key: "EVALUATING", title: "Synthesizing AI Recommendation", desc: "Formulating condition-specific verdict & clean alternatives..." },
+  { id: 5, key: "RESULT", title: "Intelligence Report Ready", desc: "Finalizing personalized nutrition breakdown..." }
 ];
 
-export const ScanningOverlay: React.FC<ScanningOverlayProps> = ({ onComplete, productTitle }) => {
+export const ScanningOverlay: React.FC<ScanningOverlayProps> = ({ onComplete, productTitle, healthConditions, activeStageIndex }) => {
   const { colors } = useTheme();
-  const [currentStage, setCurrentStage] = useState(0);
+  const [currentStage, setCurrentStage] = useState(activeStageIndex !== undefined ? activeStageIndex : 0);
 
   // Animation values
   const pulseRing1 = useRef(new Animated.Value(0.6)).current;
   const pulseRing2 = useRef(new Animated.Value(0.4)).current;
   const scanLine = useRef(new Animated.Value(0)).current;
   const progressVal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (activeStageIndex !== undefined) {
+      setCurrentStage(activeStageIndex);
+      Animated.timing(progressVal, {
+        toValue: (activeStageIndex + 1) / STAGES.length,
+        duration: 350,
+        useNativeDriver: false
+      }).start();
+    }
+  }, [activeStageIndex]);
 
   useEffect(() => {
     // Pulse rings loop
@@ -43,33 +57,36 @@ export const ScanningOverlay: React.FC<ScanningOverlayProps> = ({ onComplete, pr
     // Scan line vertical loop
     Animated.loop(
       Animated.sequence([
-        Animated.timing(scanLine, { toValue: 1, duration: 1000, easing: Easing.linear, useNativeDriver: true }),
-        Animated.timing(scanLine, { toValue: 0, duration: 1000, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(scanLine, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(scanLine, { toValue: 0, duration: 900, easing: Easing.linear, useNativeDriver: true }),
       ])
     ).start();
 
-    // Overall Progress (Fast-tracked sub-350ms transition)
-    Animated.timing(progressVal, {
-      toValue: 1,
-      duration: 300,
-      easing: Easing.linear,
-      useNativeDriver: false
-    }).start();
+    // If activeStageIndex is not controlled externally, run the 5-stage simulation animation
+    if (activeStageIndex === undefined) {
+      Animated.timing(progressVal, {
+        toValue: 1,
+        duration: 2200,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: false
+      }).start();
 
-    // Fast stage updates
-    const t1 = setTimeout(() => setCurrentStage(1), 80);
-    const t2 = setTimeout(() => setCurrentStage(2), 160);
-    const t3 = setTimeout(() => setCurrentStage(3), 240);
-    const t4 = setTimeout(() => {
-      if (onComplete) onComplete();
-    }, 320);
+      const t1 = setTimeout(() => setCurrentStage(1), 450);
+      const t2 = setTimeout(() => setCurrentStage(2), 900);
+      const t3 = setTimeout(() => setCurrentStage(3), 1400);
+      const t4 = setTimeout(() => setCurrentStage(4), 1900);
+      const t5 = setTimeout(() => {
+        if (onComplete) onComplete();
+      }, 2300);
 
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-    };
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+        clearTimeout(t4);
+        clearTimeout(t5);
+      };
+    }
   }, []);
 
   const scanLineTranslate = scanLine.interpolate({
@@ -162,9 +179,33 @@ export const ScanningOverlay: React.FC<ScanningOverlayProps> = ({ onComplete, pr
       <Text style={{ color: "#F8FAFC", fontSize: 22, fontWeight: "900", textAlign: "center", letterSpacing: -0.5, marginBottom: 6 }}>
         AI Nutrition Intelligence
       </Text>
-      <Text style={{ color: "#10B981", fontSize: 14, fontWeight: "700", textAlign: "center", marginBottom: 20 }}>
+      <Text style={{ color: "#10B981", fontSize: 14, fontWeight: "700", textAlign: "center", marginBottom: 12 }}>
         {STAGES[currentStage]?.title || "Finalizing Intelligence Report..."}
       </Text>
+
+      {/* Active Health Conditions Pill Strip */}
+      {healthConditions && healthConditions.length > 0 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 6, marginBottom: 16, maxWidth: 320 }}>
+          <Text style={{ color: "#94A3B8", fontSize: 11, fontWeight: "700", alignSelf: "center", marginRight: 4 }}>
+            Evaluating:
+          </Text>
+          {healthConditions.map((cond) => (
+            <View
+              key={cond}
+              style={{
+                backgroundColor: "rgba(16, 185, 129, 0.15)",
+                borderColor: "#10B981",
+                borderWidth: 1,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 10
+              }}
+            >
+              <Text style={{ color: "#34D399", fontSize: 11, fontWeight: "800" }}>{cond}</Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Progress Bar */}
       <View style={{

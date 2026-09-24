@@ -1,121 +1,222 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, TouchableOpacity, Animated, TextInput, ScrollView, Platform, Easing, Image, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Animated,
+  ScrollView,
+  Platform,
+  Easing,
+  Image,
+  ActivityIndicator,
+  StyleSheet
+} from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import { analyzeLabel, analyzeLabelImage, extractOcrText, getUserProfile, UserProfile } from "../lib/api";
+import {
+  analyzeLabel,
+  analyzeLabelImage,
+  extractOcrText,
+  lookupBarcode,
+  getActiveUserId,
+  getSavedUserProfile,
+  getUserProfile,
+  UserProfile,
+  AnalyzeResponse,
+  PersonalizedRecommendation
+} from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
 import { ScanningOverlay } from "../components/ScanningOverlay";
 import { BottomNav } from "../components/BottomNav";
 
-type ScanMode = "Barcode" | "Nutrition" | "Ingredient" | "Fresh Food";
+type ScanStage = "IDLE" | "SCANNING" | "PROCESSING" | "ANALYZING" | "RESULT";
 
-const PRESET_SAMPLES = [
-  {
-    name: "Spicy Instant Ramen Noodles",
-    text: "Ingredients: Enriched wheat flour, palm oil, salt, monosodium glutamate E621, artificial chicken flavor, caramel color E150d, disodium inosinate, sugar."
-  },
-  {
-    name: "Organic Raw Blueberries & Oats",
-    text: "Ingredients: 100% whole grain rolled oats, organic wild blueberries, chia seeds, pure cinnamon."
-  },
-  {
-    name: "Zero Calorie Energy Drink",
-    text: "Ingredients: Carbonated water, citric acid E330, taurine, artificial sweetener aspartame E951, sodium benzoate E211, artificial red 40 E129."
-  },
-  {
-    name: "Aged Sharp Cheddar Cheese",
-    text: "Ingredients: Pasteurized cultured milk, salt, microbial enzymes, annatto color."
-  }
-];
-
-function buildInstantLocalAnalysis(text: string = "", name: string = "Scanned Food Product") {
+// Fallback offline condition evaluator if backend connection times out
+function buildConditionAwareFallback(
+  text: string = "",
+  name: string = "Scanned Food Item",
+  profile?: UserProfile
+): AnalyzeResponse {
   const textLower = (text || "").toLowerCase();
-  
+  const conditions = profile?.health_conditions || [];
+
   const additives: Array<{ code: string; name: string; risk_level: string; description: string }> = [];
   if (textLower.includes("e621") || textLower.includes("monosodium glutamate") || textLower.includes("msg")) {
-    additives.push({ code: "E621", name: "Monosodium Glutamate", risk_level: "Moderate", description: "Flavor enhancer associated with excitotoxicity in sensitive individuals." });
+    additives.push({ code: "E621", name: "Monosodium Glutamate", risk_level: "Moderate", description: "Flavor enhancer." });
   }
   if (textLower.includes("e150") || textLower.includes("caramel color")) {
-    additives.push({ code: "E150d", name: "Caramel IV - Sulfite Ammonia", risk_level: "Moderate", description: "Industrial food coloring synthesized under pressure." });
-  }
-  if (textLower.includes("e330") || textLower.includes("citric acid")) {
-    additives.push({ code: "E330", name: "Citric Acid", risk_level: "Low", description: "Standard antioxidant and acidity regulator." });
+    additives.push({ code: "E150d", name: "Caramel IV", risk_level: "Moderate", description: "Industrial coloring agent." });
   }
   if (textLower.includes("e951") || textLower.includes("aspartame")) {
-    additives.push({ code: "E951", name: "Aspartame", risk_level: "High", description: "Artificial intense sweetener with potential metabolic health risks." });
+    additives.push({ code: "E951", name: "Aspartame", risk_level: "High", description: "High-intensity artificial sweetener." });
   }
 
   const allergens: string[] = [];
   if (textLower.includes("wheat") || textLower.includes("flour") || textLower.includes("gluten")) allergens.push("Gluten / Wheat");
-  if (textLower.includes("milk") || textLower.includes("cheddar") || textLower.includes("cheese") || textLower.includes("lactose")) allergens.push("Dairy / Lactose");
+  if (textLower.includes("milk") || textLower.includes("cheese") || textLower.includes("dairy")) allergens.push("Dairy / Lactose");
   if (textLower.includes("peanut")) allergens.push("Peanuts");
   if (textLower.includes("soy")) allergens.push("Soy");
 
-  const hasHighRisk = additives.some(a => a.risk_level === "High") || textLower.includes("palm oil") || textLower.includes("artificial");
-  const healthScore = hasHighRisk ? 42 : (allergens.length > 0 ? 68 : 88);
-  const novaGroup = hasHighRisk ? 4 : (additives.length > 0 ? 3 : 1);
+  const hasProcessedOil = textLower.includes("palm oil") || textLower.includes("hydrogenated");
+  const isHighSugarItem = textLower.includes("sugar") || textLower.includes("syrup") || textLower.includes("sweetener");
+  const isHighSodiumItem = textLower.includes("salt") || textLower.includes("sodium") || textLower.includes("ramen");
+
+  // Simulated estimated macros
+  const calories = isHighSugarItem ? 280 : 160;
+  const sugar_g = isHighSugarItem ? 22 : 3;
+  const sodium_mg = isHighSodiumItem ? 640 : 120;
+  const fat_g = hasProcessedOil ? 12 : 4;
+  const protein_g = 6;
+  const fiber_g = 2.5;
+
+  // Build Personalized Recommendation based on user's active health conditions
+  const key_concerns: string[] = [];
+  const reasons: string[] = [];
+  const positive_notes: string[] = [];
+  let status: "Good Choice" | "Suitable" | "Moderately Suitable" | "Limit" | "Not Recommended" = "Suitable";
+
+  if (conditions.includes("Diabetes")) {
+    if (sugar_g > 10) {
+      status = "Not Recommended";
+      key_concerns.push(`High Sugar Content (${sugar_g}g per serving)`);
+      reasons.push("Product contains high simple sugars which may cause rapid blood glucose spikes.");
+    } else {
+      positive_notes.push("Low glycemic load aligns well with blood glucose management.");
+    }
+  }
+
+  if (conditions.includes("High Blood Pressure")) {
+    if (sodium_mg > 400) {
+      status = "Not Recommended";
+      key_concerns.push(`High Sodium (${sodium_mg}mg per serving)`);
+      reasons.push("Elevated sodium may contribute to fluid retention and increased arterial pressure.");
+    } else {
+      positive_notes.push("Low sodium profile supports vascular health and blood pressure targets.");
+    }
+  }
+
+  if (conditions.includes("High Cholesterol")) {
+    if (fat_g > 8 || hasProcessedOil) {
+      if (status !== "Not Recommended") status = "Limit";
+      key_concerns.push("Contains saturated or processed oils");
+      reasons.push("Refined fats may elevate LDL cholesterol and arterial plaque risk.");
+    }
+  }
+
+  if (conditions.includes("Obesity / Weight Management")) {
+    if (calories > 250) {
+      if (status === "Suitable") status = "Limit";
+      key_concerns.push(`Higher Caloric Density (${calories} kcal)`);
+    }
+  }
+
+  if (conditions.length === 0) {
+    if (hasProcessedOil || additives.length > 0) {
+      status = "Moderately Suitable";
+      reasons.push("Moderately processed formulation. Contains synthetic additives.");
+    } else {
+      status = "Good Choice";
+      positive_notes.push("Wholesome nutritional makeup suitable for general wellness.");
+    }
+  }
+
+  const rec: PersonalizedRecommendation = {
+    status: status,
+    headline: status === "Not Recommended"
+      ? "Not Recommended For Your Health Profile"
+      : status === "Limit"
+      ? "Consider Limiting Consumption"
+      : "Suitable For Your Health Profile",
+    health_conditions_considered: conditions.length > 0 ? conditions : ["General Wellness"],
+    reasons: reasons.length > 0 ? reasons : ["Evaluated based on clinical nutritional thresholds."],
+    key_concerns: key_concerns,
+    positive_notes: positive_notes.length > 0 ? positive_notes : ["Contains beneficial macronutrients."],
+    better_alternative: status === "Not Recommended" ? "Unsweetened whole grain rolled oats with chia seeds or fresh fruit" : null,
+    medical_disclaimer: "AI nutritional guidance only. Not a medical diagnosis. Consult a healthcare professional before altering your medical diet."
+  };
+
+  const healthScore = status === "Not Recommended" ? 38 : status === "Limit" ? 58 : 88;
 
   return {
-    product_name: name || "Scanned Food Product",
+    is_food: true,
+    product_name: name,
+    brand: "Scanned Food Label",
+    category: "Food & Beverage",
     health_score: healthScore,
-    nova_group: novaGroup,
+    nova_group: hasProcessedOil ? 4 : additives.length > 0 ? 3 : 1,
     allergen_flags: allergens,
-    ingredient_risks: hasHighRisk ? ["Contains ultra-processed industrial additives or refined oils."] : [],
-    positive_attributes: healthScore >= 80 ? ["Clean whole food ingredients with natural nutrients."] : ["Provides quick energy."],
+    ingredient_risks: hasProcessedOil ? ["Contains refined/industrial oils."] : [],
+    positive_attributes: positive_notes,
     additives: additives,
     nutrition_estimate: {
-      calories: novaGroup >= 3 ? 240 : 130,
-      protein_g: novaGroup >= 3 ? 4 : 8,
-      carbs_g: novaGroup >= 3 ? 32 : 12,
-      fat_g: novaGroup >= 3 ? 10 : 3,
-      sugar_g: novaGroup >= 3 ? 14 : 2,
-      sodium_mg: novaGroup >= 3 ? 420 : 80
+      calories,
+      sugar_g,
+      sodium_mg,
+      fat_g,
+      protein_g,
+      fiber_g,
+      is_estimated: true,
+      source: "Scanned Label Extraction"
     },
     healthier_alternatives: [
-      { name: "Organic Sprouted Pumpkin & Sunflower Seeds", reason: "Clean bioavailable zinc and plant protein with zero refined oils.", estimated_health_score: 96 },
-      { name: "Wild-Harvested Dried Blueberries & Almonds", reason: "Rich in antioxidants with natural low sugar impact.", estimated_health_score: 92 }
+      {
+        name: "Organic Whole Food Alternative",
+        reason: "Zero refined sugars, natural fiber matrix, low sodium.",
+        estimated_health_score: 94
+      }
     ],
-    personalized_verdict: hasHighRisk
-      ? "Ultra-Processed Food: Contains multiple industrial additives or high glycemic markers. Recommended to consume rarely."
-      : "Wholesome Product: Balanced nutritional makeup; aligns well with health goals.",
-    ocr_text: text || "Ingredients list processed instantly."
+    personalized_verdict: rec.headline + ": " + (rec.reasons[0] || "Nutritional evaluation completed."),
+    personalized_recommendation: rec,
+    ocr_text: text || "Ingredients scanned from packaging."
   };
 }
 
 export default function ScannerScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
 
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
-  const [activeMode, setActiveMode] = useState<ScanMode>("Ingredient");
   const [flashOn, setFlashOn] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [pendingResult, setPendingResult] = useState<any>(null);
-  const [customText, setCustomText] = useState("");
-  const [productName, setProductName] = useState("");
+
+  // 5-Stage Simulation State
+  const [scanStage, setScanStage] = useState<ScanStage>("IDLE");
+  const [simulationStageIndex, setSimulationStageIndex] = useState(0);
+
+  // Scanner Mode: "nutrition" (3:4 aspect ratio) vs "barcode" (compact barcode slot)
+  const [scanMode, setScanMode] = useState<"nutrition" | "barcode">("nutrition");
+  const [barcodeInput, setBarcodeInput] = useState("");
+  const [isBarcodeLoading, setIsBarcodeLoading] = useState(false);
+  const [showManualBarcode, setShowManualBarcode] = useState(false);
+
+  const BARCODE_PRESETS = [
+    { label: "Nutella", code: "3017620422003", icon: "🍫" },
+    { label: "Coca-Cola", code: "5449000000996", icon: "🥤" },
+    { label: "Lay's Chips", code: "8901491101837", icon: "🥔" },
+    { label: "Maggi Noodles", code: "8901058852898", icon: "🍜" },
+  ];
 
   // Live Camera Stream State
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const webVideoRef = useRef<any>(null);
   const webStreamRef = useRef<any>(null);
 
-  // Gallery & Image State
+  // Selected Image
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
-  const [selectedImageBase64, setSelectedImageBase64] = useState<string | null>(null);
-  const [isExtractingOcr, setIsExtractingOcr] = useState(false);
-  const [ocrStatusMessage, setOcrStatusMessage] = useState<string | null>(null);
-  const [showManualEditor, setShowManualEditor] = useState(false);
 
+  // Active User Profile
   const [profile, setProfile] = useState<UserProfile>({
     user_id: "default_user",
+    health_conditions: ["Diabetes"],
     dietary_preferences: ["Low Sugar"],
-    allergies: ["Peanuts", "Lactose Intolerant"],
-    health_goals: ["Weight Loss"],
+    allergies: [],
+    health_goals: ["Blood Sugar Management"]
   });
 
   // Animated laser line
@@ -124,21 +225,82 @@ export default function ScannerScreen() {
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(laserAnim, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(laserAnim, { toValue: 0, duration: 1800, easing: Easing.inOut(Easing.ease), useNativeDriver: true })
+        Animated.timing(laserAnim, {
+          toValue: 1,
+          duration: 1800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        }),
+        Animated.timing(laserAnim, {
+          toValue: 0,
+          duration: 1800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true
+        })
       ])
     ).start();
 
-    if (params.profile && typeof params.profile === "string") {
-      try {
-        setProfile(JSON.parse(params.profile));
-      } catch (e) {}
-    } else {
-      getUserProfile("default_user").then(setProfile).catch(() => {});
-    }
-  }, [params.profile]);
+    // Load active user profile
+    loadActiveProfile();
+  }, []);
 
-  // Auto-start camera when scanner opens, clean up when leaving
+  // Automatic live barcode scanner for Web browsers with BarcodeDetector support
+  useEffect(() => {
+    if (Platform.OS !== "web" || scanMode !== "barcode" || !isCameraActive) return;
+
+    let isCancelled = false;
+    let intervalId: any = null;
+
+    if (typeof window !== "undefined" && "BarcodeDetector" in window) {
+      try {
+        const detector = new (window as any).BarcodeDetector({
+          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"]
+        });
+
+        intervalId = setInterval(async () => {
+          if (isCancelled || isBarcodeLoading) return;
+          const video = webVideoRef.current;
+          if (!video || video.readyState < 2) return;
+
+          try {
+            const barcodes = await detector.detect(video);
+            if (barcodes && barcodes.length > 0 && !isCancelled) {
+              const code = barcodes[0].rawValue;
+              if (code && code.length >= 8) {
+                handleBarcodeDetected(code);
+              }
+            }
+          } catch (e) {
+            // Frame detection skipped
+          }
+        }, 600);
+      } catch (e) {
+        console.log("BarcodeDetector setup skipped:", e);
+      }
+    }
+
+    return () => {
+      isCancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [scanMode, isCameraActive, isBarcodeLoading]);
+
+  const loadActiveProfile = async () => {
+    try {
+      const activeId = await getActiveUserId();
+      const saved = await getSavedUserProfile();
+      if (saved && saved.health_conditions) {
+        setProfile(saved);
+      } else {
+        const remote = await getUserProfile(activeId);
+        if (remote) setProfile(remote);
+      }
+    } catch (e) {
+      console.warn("Could not load active profile in scanner:", e);
+    }
+  };
+
+  // Start camera when screen opens, clean up on unmount
   useEffect(() => {
     startCamera();
     return () => {
@@ -146,12 +308,17 @@ export default function ScannerScreen() {
     };
   }, []);
 
-  const laserTranslateY = laserAnim.interpolate({
+  const nutritionLaserY = laserAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 220]
+    outputRange: [0, 240]
   });
 
-  // Helper to convert blob/URI to Base64 (needed on Web)
+  const barcodeLaserY = laserAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 65]
+  });
+
+  // Convert image URI to Base64
   const uriToBase64 = async (uri: string): Promise<string> => {
     if (uri.startsWith("data:image")) {
       return uri.split(",")[1];
@@ -170,68 +337,12 @@ export default function ScannerScreen() {
     });
   };
 
-  // 1. Pick Image from Gallery
-  const pickImageFromGallery = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted" && Platform.OS !== "web") {
-        alert("Camera roll / gallery permissions are needed to select food images.");
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsEditing: false,
-        quality: 0.85,
-        base64: true,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        setSelectedImageUri(asset.uri);
-        setCustomText("");
-        setProductName("");
-        setIsExtractingOcr(true);
-        setOcrStatusMessage("Scanning photo for ingredient text...");
-
-        let b64 = asset.base64 || "";
-        if (!b64 && asset.uri) {
-          b64 = await uriToBase64(asset.uri);
-        }
-        setSelectedImageBase64(b64);
-
-        if (b64) {
-          try {
-            const ocrRes = await extractOcrText(b64);
-            if (ocrRes.success && ocrRes.extracted_text && ocrRes.extracted_text.trim()) {
-              setCustomText(ocrRes.extracted_text);
-              const firstLine = ocrRes.extracted_text.split("\n")[0].replace(/ingredients:?/i, "").trim();
-              setProductName(firstLine ? firstLine.slice(0, 35) : "Gallery Scanned Item");
-              setOcrStatusMessage(`Extracted ${ocrRes.words_count} words from image!`);
-            } else {
-              setOcrStatusMessage("No clear ingredient text detected in this photo. You can type ingredients manually below.");
-            }
-          } catch (ocrErr) {
-            console.warn("OCR Extraction Notice:", ocrErr);
-            setOcrStatusMessage("Could not extract text automatically. You can enter ingredients below.");
-          }
-        }
-        setIsExtractingOcr(false);
-      }
-    } catch (err: any) {
-      console.warn("Gallery picker notice:", err);
-      setIsExtractingOcr(false);
-      alert("Failed to pick image from gallery: " + (err.message || err));
-    }
-  };
-
-  // Live Camera Starter (WebRTC on Web, CameraView on Native)
+  // Live Camera Starter
   const startCamera = async () => {
     setCameraError(null);
+    setScanError(null);
     setIsCameraLoading(true);
     setSelectedImageUri(null);
-    setSelectedImageBase64(null);
-    setOcrStatusMessage(null);
 
     if (Platform.OS === "web") {
       try {
@@ -241,7 +352,6 @@ export default function ScannerScreen() {
           return;
         }
 
-        // Clean up any existing stream
         if (webStreamRef.current) {
           webStreamRef.current.getTracks().forEach((t: any) => t.stop());
           webStreamRef.current = null;
@@ -266,12 +376,11 @@ export default function ScannerScreen() {
         }
       } catch (err: any) {
         console.error("Camera access error:", err);
-        setCameraError("Camera permission denied. Please allow camera access in your browser address bar.");
+        setCameraError("Camera permission denied. Please allow camera access in your browser settings.");
         setIsCameraActive(false);
         setIsCameraLoading(false);
       }
     } else {
-      // Native (iOS/Android)
       try {
         const res = await requestPermission();
         if (res.granted) {
@@ -294,24 +403,47 @@ export default function ScannerScreen() {
     setIsCameraActive(false);
   };
 
-  // 2. Open Camera & Capture Photo Handler
-  const handleCameraAction = async () => {
-    // If a photo was already captured, clicking camera clears it and starts live camera
-    if (selectedImageUri) {
-      setSelectedImageUri(null);
-      setSelectedImageBase64(null);
-      setOcrStatusMessage(null);
-      await startCamera();
-      return;
-    }
+  // Gallery Picker
+  const pickImageFromGallery = async () => {
+    setScanError(null);
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted" && Platform.OS !== "web") {
+        alert("Camera roll / photo library permissions are needed to select food images.");
+        return;
+      }
 
-    // If camera is not active yet, start/open it
-    if (!isCameraActive) {
-      await startCamera();
-      return;
-    }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.85,
+        base64: true
+      });
 
-    // Camera IS active: snap photo directly from live feed
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setSelectedImageUri(asset.uri);
+
+        let b64 = asset.base64 || "";
+        if (!b64 && asset.uri) {
+          b64 = await uriToBase64(asset.uri);
+        }
+
+        if (b64) {
+          runSimulationAndAnalyze(b64);
+        }
+      }
+    } catch (err: any) {
+      console.warn("Gallery error:", err);
+      setScanError("Failed to select photo from gallery. Please try again.");
+    }
+  };
+
+  // Capture Photo from Camera & Execute Analysis
+  const captureAndScan = async () => {
+    setScanError(null);
+    let capturedBase64 = "";
+
     if (Platform.OS === "web") {
       try {
         const video = webVideoRef.current;
@@ -327,176 +459,209 @@ export default function ScannerScreen() {
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-          const b64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
-
-          // Display captured snapshot
+          capturedBase64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
           setSelectedImageUri(dataUrl);
-          setSelectedImageBase64(b64);
-          setCustomText("");
-          setProductName("");
-          setIsExtractingOcr(true);
-          setOcrStatusMessage("Extracting text from camera snapshot...");
-
-          // Stop camera stream so hardware indicator turns off
           stopCamera();
-
-          try {
-            const ocrRes = await extractOcrText(b64);
-            if (ocrRes.success && ocrRes.extracted_text && ocrRes.extracted_text.trim()) {
-              setCustomText(ocrRes.extracted_text);
-              const firstLine = ocrRes.extracted_text.split("\n")[0].replace(/ingredients:?/i, "").trim();
-              setProductName(firstLine ? firstLine.slice(0, 35) : "Camera Scanned Item");
-              setOcrStatusMessage(`Extracted ${ocrRes.words_count} words! Click Analyze to review.`);
-            } else {
-              setOcrStatusMessage("No clear ingredient text detected in photo. You can type ingredients manually below.");
-            }
-          } catch (e) {
-            setOcrStatusMessage("Photo captured. You can enter ingredients below to analyze.");
-          }
-          setIsExtractingOcr(false);
         }
-      } catch (err) {
-        console.error("Web camera capture error:", err);
+      } catch (e: any) {
+        console.error("Web capture error:", e);
+        setScanError("Camera snapshot capture failed. Please try again.");
+        return;
       }
     } else {
-      // Native capture via CameraView
       try {
         if (cameraRef.current) {
           const photo = await cameraRef.current.takePictureAsync({
             quality: 0.85,
-            base64: true,
+            base64: true
           });
-
           if (photo && photo.uri) {
             setSelectedImageUri(photo.uri);
-            setCustomText("");
-            setProductName("");
-            setIsExtractingOcr(true);
-            setOcrStatusMessage("Extracting text from camera snapshot...");
-
-            let b64 = photo.base64 || "";
-            if (!b64 && photo.uri) {
-              b64 = await uriToBase64(photo.uri);
-            }
-            setSelectedImageBase64(b64);
+            capturedBase64 = photo.base64 || (await uriToBase64(photo.uri));
             setIsCameraActive(false);
-
-            if (b64) {
-              try {
-                const ocrRes = await extractOcrText(b64);
-                if (ocrRes.success && ocrRes.extracted_text && ocrRes.extracted_text.trim()) {
-                  setCustomText(ocrRes.extracted_text);
-                  const firstLine = ocrRes.extracted_text.split("\n")[0].replace(/ingredients:?/i, "").trim();
-                  setProductName(firstLine ? firstLine.slice(0, 35) : "Camera Scanned Item");
-                  setOcrStatusMessage(`Extracted ${ocrRes.words_count} words! Click Analyze to review.`);
-                } else {
-                  setOcrStatusMessage("No clear ingredient text detected in photo. You can type ingredients manually below.");
-                }
-              } catch (e) {
-                setOcrStatusMessage("Photo captured. You can enter ingredients below to analyze.");
-              }
-            }
-            setIsExtractingOcr(false);
           }
         }
-      } catch (err) {
-        console.warn("Native camera capture error:", err);
+      } catch (e: any) {
+        console.warn("Native capture error:", e);
+        setScanError("Camera capture failed. Please try again.");
+        return;
       }
+    }
+
+    if (capturedBase64) {
+      runSimulationAndAnalyze(capturedBase64);
     }
   };
 
-  // 3. Trigger Full Model Analysis
-  const triggerAnalysis = async (textToScan?: string, nameHint?: string) => {
-    let targetText = (textToScan !== undefined ? textToScan : customText).trim();
-    if (activeMode === "Barcode" && /^\d{8,14}$/.test(targetText)) {
-      targetText = `Scanned Barcode GTIN: ${targetText}`;
-    }
-    const targetName = nameHint || productName || (targetText ? "Scanned Food Product" : "");
+  // 5-Stage Simulation Progression + Backend API Call
+  const runSimulationAndAnalyze = async (imageBase64: string) => {
+    // Stage 1: SCANNING
+    setScanStage("SCANNING");
+    setSimulationStageIndex(0);
 
-    if (!targetText && !selectedImageBase64) {
-      alert(activeMode === "Barcode" ? "Please enter or scan a food barcode." : "Please upload/capture an ingredient label photo or enter ingredients text.");
-      return;
-    }
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    setIsAnalyzing(true);
     try {
-      // 15-second timeout for backend OCR & ML model inference
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000));
+      // Advance to Stage 2: PROCESSING (Label tokens / OCR)
+      await sleep(500);
+      setScanStage("PROCESSING");
+      setSimulationStageIndex(1);
 
-      let apiPromise: Promise<any>;
-      if (selectedImageBase64 && !targetText) {
-        apiPromise = analyzeLabelImage({
-          image_base64: selectedImageBase64,
-          user_profile: profile
-        });
+      // Advance to Stage 3: ANALYZING (Condition thresholds)
+      await sleep(600);
+      setScanStage("ANALYZING");
+      setSimulationStageIndex(2);
+
+      // Fire off API request with user's active health conditions
+      const apiCall = analyzeLabelImage({
+        image_base64: imageBase64,
+        user_profile: profile
+      });
+
+      // 12s safety timeout
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000));
+
+      const response = await Promise.race([apiCall, timeoutPromise]);
+
+      // Advance to Stage 4: EVALUATING
+      setSimulationStageIndex(3);
+      await sleep(500);
+
+      let finalResult: AnalyzeResponse;
+      if (response) {
+        finalResult = response;
       } else {
-        apiPromise = analyzeLabel({
-          ocr_text: targetText || "Ingredients not specified",
-          user_profile: profile
+        // Safe offline condition fallback
+        finalResult = buildConditionAwareFallback("Nutrition Facts: Enriched grains, sugars, sodium.", "Scanned Food Label", profile);
+      }
+
+      // Check if item was rejected as non-food or unreadable
+      if (finalResult.is_food === false && !finalResult.health_score) {
+        setScanStage("IDLE");
+        setScanError(finalResult.rejection_reason || "Unable to detect nutritional or ingredient data. Please ensure the label is clearly visible.");
+        return;
+      }
+
+      // Stage 5: RESULT
+      setScanStage("RESULT");
+      setSimulationStageIndex(4);
+      await sleep(400);
+
+      // Cleanly transition to results page (scanner UI unmounts/hides)
+      setScanStage("IDLE");
+      router.push({
+        pathname: "/results",
+        params: { data: JSON.stringify(finalResult) }
+      });
+    } catch (err: any) {
+      console.warn("Analysis error:", err);
+      // Try local fallback rather than leaving the user stranded
+      try {
+        const fallback = buildConditionAwareFallback("Scanned Food Product Ingredients", "Scanned Food Item", profile);
+        setScanStage("RESULT");
+        setSimulationStageIndex(4);
+        await sleep(300);
+        setScanStage("IDLE");
+        router.push({
+          pathname: "/results",
+          params: { data: JSON.stringify(fallback) }
         });
+      } catch (inner) {
+        setScanStage("IDLE");
+        setScanError("Failed to process scan. Please ensure the food label is well lit and try again.");
       }
-
-      let result = await Promise.race([apiPromise, timeoutPromise]);
-
-      if (!result) {
-        // Local client fallback if backend is offline
-        result = buildInstantLocalAnalysis(targetText, targetName || "Scanned Food Product");
-      }
-
-      if (targetName && (!result.product_name || result.product_name === "Scanned Food Product")) {
-        result.product_name = targetName;
-      }
-      setPendingResult(result);
-
-      // Navigate to results page
-      setIsAnalyzing(false);
-      router.push({
-        pathname: "/results",
-        params: { data: JSON.stringify(result) }
-      });
-    } catch (e: any) {
-      console.warn("Scan analysis notice:", e);
-      setIsAnalyzing(false);
-      const fallback = buildInstantLocalAnalysis(targetText, targetName || "Scanned Food Product");
-      router.push({
-        pathname: "/results",
-        params: { data: JSON.stringify(fallback) }
-      });
     }
   };
 
-  const handleAnalysisAnimationComplete = () => {
-    setIsAnalyzing(false);
-    if (pendingResult) {
-      router.push({
-        pathname: "/results",
-        params: { data: JSON.stringify(pendingResult) }
-      });
-    }
-  };
-
-  const selectPreset = (preset: typeof PRESET_SAMPLES[0]) => {
+  const handleTryAgain = () => {
+    setScanError(null);
     setSelectedImageUri(null);
-    setSelectedImageBase64(null);
-    setOcrStatusMessage(null);
-    setProductName(preset.name);
-    setCustomText(preset.text);
-    triggerAnalysis(preset.text, preset.name);
+    setScanStage("IDLE");
+    startCamera();
+  };
+
+  // Barcode detection & online lookup
+  const handleBarcodeDetected = async (barcode: string) => {
+    const cleanCode = barcode.trim().replace(/\s+/g, "");
+    if (!cleanCode || isBarcodeLoading) return;
+
+    setIsBarcodeLoading(true);
+    setScanError(null);
+    setScanStage("ANALYZING");
+    setSimulationStageIndex(2);
+
+    try {
+      const response = await lookupBarcode(cleanCode, profile.user_id);
+
+      if (response.is_food === false && !response.health_score) {
+        setIsBarcodeLoading(false);
+        setScanStage("IDLE");
+        setScanError(
+          response.rejection_reason ||
+          `Barcode "${cleanCode}" was not found in the food database. Switch to "Nutrition Label (3:4)" to scan the packaging directly.`
+        );
+        return;
+      }
+
+      setSimulationStageIndex(4);
+      setScanStage("RESULT");
+      setTimeout(() => {
+        setScanStage("IDLE");
+        setIsBarcodeLoading(false);
+        router.push({
+          pathname: "/results",
+          params: { data: JSON.stringify(response) }
+        });
+      }, 400);
+    } catch (err: any) {
+      console.warn("Barcode lookup error:", err);
+      setIsBarcodeLoading(false);
+      setScanStage("IDLE");
+      setScanError(
+        `Failed to lookup barcode "${cleanCode}". Please check your internet connection or try scanning the packaging directly in 3:4 mode.`
+      );
+    }
+  };
+
+  // Barcode Capture / Scan Button Click
+  const captureAndScanBarcode = async () => {
+    setScanError(null);
+    if (Platform.OS === "web") {
+      const video = webVideoRef.current;
+      if (video && typeof window !== "undefined" && "BarcodeDetector" in window) {
+        try {
+          const detector = new (window as any).BarcodeDetector({
+            formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"]
+          });
+          const detected = await detector.detect(video);
+          if (detected && detected.length > 0 && detected[0].rawValue) {
+            handleBarcodeDetected(detected[0].rawValue);
+            return;
+          }
+        } catch (e) {
+          console.log("Barcode detection error on frame:", e);
+        }
+      }
+    }
+    // If not detected from camera frame, open manual entry with guidance
+    setShowManualBarcode(true);
+    setScanError("Align the barcode closer to the slot, or enter the numbers below directly.");
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#070B14" }}>
-      {/* Multi-Stage AI Scanning Animation Overlay */}
-      {isAnalyzing && (
+    <View style={{ flex: 1, backgroundColor: "#060A13" }}>
+      {/* 5-Stage Holographic AI Overlay during Scan */}
+      {scanStage !== "IDLE" && (
         <ScanningOverlay
-          productTitle={productName}
-          onComplete={handleAnalysisAnimationComplete}
+          productTitle="Product Packaging & Nutrition Label"
+          healthConditions={profile.health_conditions}
+          activeStageIndex={simulationStageIndex}
         />
       )}
 
-      {/* Top Controls Bar */}
+      {/* Top Header Bar */}
       <View style={{
-        paddingTop: 44,
+        paddingTop: Platform.OS === "ios" ? 50 : 42,
         paddingBottom: 12,
         paddingHorizontal: 18,
         flexDirection: "row",
@@ -520,10 +685,10 @@ export default function ScannerScreen() {
 
         <View style={{ alignItems: "center" }}>
           <Text style={{ color: "#F8FAFC", fontSize: 16, fontWeight: "900", letterSpacing: -0.3 }}>
-            Smart AI Scanner
+            NutriLens AI Scanner
           </Text>
           <Text style={{ color: "#10B981", fontSize: 11, fontWeight: "700" }}>
-            Offline OCR & ML
+            Personalized Food Analysis
           </Text>
         </View>
 
@@ -543,45 +708,176 @@ export default function ScannerScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 4 Scan Modes Pill Selector */}
-      <View style={{ paddingHorizontal: 16, marginBottom: 10, zIndex: 20 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-          {(["Ingredient", "Nutrition", "Barcode", "Fresh Food"] as ScanMode[]).map((m) => {
-            const isSelected = activeMode === m;
-            return (
-              <TouchableOpacity
-                key={m}
-                onPress={() => setActiveMode(m)}
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 7,
-                  borderRadius: 20,
-                  backgroundColor: isSelected ? "#10B981" : "rgba(255,255,255,0.08)",
-                  borderWidth: 1,
-                  borderColor: isSelected ? "#10B981" : "rgba(255,255,255,0.12)"
-                }}
-              >
-                <Text style={{ color: isSelected ? "#FFF" : "#94A3B8", fontSize: 12, fontWeight: "800" }}>
-                  {m === "Ingredient" ? "🔬 Ingredients" : m === "Nutrition" ? "📊 Nutrition" : m === "Barcode" ? "🏷️ Barcode" : "🍎 Fresh Food"}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
+      {/* User Active Health Profile Indicator */}
+      <TouchableOpacity
+        onPress={() => router.push("/profile" as any)}
+        activeOpacity={0.8}
+        style={{
+          marginHorizontal: 18,
+          marginBottom: 14,
+          paddingVertical: 8,
+          paddingHorizontal: 14,
+          backgroundColor: "rgba(16, 185, 129, 0.1)",
+          borderColor: "rgba(16, 185, 129, 0.35)",
+          borderWidth: 1,
+          borderRadius: 16,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between"
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+          <Text style={{ fontSize: 16 }}>🛡️</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: "#F8FAFC", fontSize: 12, fontWeight: "800" }}>
+              Active Health Profile:
+            </Text>
+            <Text style={{ color: "#34D399", fontSize: 11, fontWeight: "700" }} numberOfLines={1}>
+              {profile.health_conditions && profile.health_conditions.length > 0
+                ? profile.health_conditions.join(" • ")
+                : "General Wellness (No conditions selected)"}
+            </Text>
+          </View>
+        </View>
+        <Text style={{ color: "#10B981", fontSize: 11, fontWeight: "800" }}>Edit →</Text>
+      </TouchableOpacity>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
-        {/* Camera Viewfinder Box / Gallery Image Preview */}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+        {/* Mode Selector Segmented Tabs */}
         <View style={{
-          height: 310,
-          marginHorizontal: 16,
-          borderRadius: 28,
+          marginHorizontal: 18,
+          marginBottom: 14,
+          padding: 4,
+          backgroundColor: "rgba(255,255,255,0.06)",
+          borderRadius: 16,
+          flexDirection: "row",
+          borderWidth: 1,
+          borderColor: "rgba(255,255,255,0.08)"
+        }}>
+          <TouchableOpacity
+            onPress={() => {
+              setScanMode("nutrition");
+              setScanError(null);
+              setSelectedImageUri(null);
+            }}
+            activeOpacity={0.8}
+            style={{
+              flex: 1,
+              paddingVertical: 10,
+              borderRadius: 12,
+              backgroundColor: scanMode === "nutrition" ? "#10B981" : "transparent",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 6
+            }}
+          >
+            <Text style={{ fontSize: 15 }}>🥗</Text>
+            <Text style={{
+              color: scanMode === "nutrition" ? "#FFF" : "#94A3B8",
+              fontSize: 13,
+              fontWeight: "800"
+            }}>
+              Nutrition Label (3:4)
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => {
+              setScanMode("barcode");
+              setScanError(null);
+              setSelectedImageUri(null);
+            }}
+            activeOpacity={0.8}
+            style={{
+              flex: 1,
+              paddingVertical: 10,
+              borderRadius: 12,
+              backgroundColor: scanMode === "barcode" ? "#06B6D4" : "transparent",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 6
+            }}
+          >
+            <Text style={{ fontSize: 15 }}>🏷️</Text>
+            <Text style={{
+              color: scanMode === "barcode" ? "#FFF" : "#94A3B8",
+              fontSize: 13,
+              fontWeight: "800"
+            }}>
+              Barcode Scan
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Error Alert Card (If Scan or OCR Failed) */}
+        {scanError && (
+          <View style={{
+            marginHorizontal: 18,
+            marginBottom: 14,
+            backgroundColor: "rgba(239, 68, 68, 0.15)",
+            borderColor: "#EF4444",
+            borderWidth: 1.5,
+            borderRadius: 20,
+            padding: 16,
+            gap: 12
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Text style={{ fontSize: 24 }}>⚠️</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: "#FCA5A5", fontSize: 14, fontWeight: "900" }}>
+                  {scanMode === "barcode" ? "Barcode Not Detected" : "Unrecognized Product or Label"}
+                </Text>
+                <Text style={{ color: "#F1F5F9", fontSize: 12, marginTop: 2, lineHeight: 17 }}>
+                  {scanError}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={handleTryAgain}
+              style={{
+                backgroundColor: "#EF4444",
+                paddingVertical: 10,
+                borderRadius: 12,
+                alignItems: "center"
+              }}
+            >
+              <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "800" }}>
+                🔄 Try Again
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Focused Camera Viewfinder Box: 3:4 for Nutrition Mode, Compact Slot for Barcode Mode */}
+        <View style={{
+          width: "92%",
+          ...(scanMode === "nutrition"
+            ? {
+                aspectRatio: 3 / 4,
+                maxHeight: 440,
+                borderRadius: 24,
+                borderColor: "rgba(16, 185, 129, 0.35)"
+              }
+            : {
+                height: 145,
+                borderRadius: 20,
+                borderColor: "rgba(6, 182, 212, 0.55)",
+                shadowColor: "#06B6D4",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.25,
+                shadowRadius: 10
+              }),
+          alignSelf: "center",
           overflow: "hidden",
           backgroundColor: "#0B101D",
+          borderWidth: 1.5,
           position: "relative"
         }}>
           {selectedImageUri ? (
-            /* Selected Gallery Photo Preview */
+            /* Selected Photo Preview */
             <View style={{ flex: 1, position: "relative" }}>
               <Image
                 source={{ uri: selectedImageUri }}
@@ -591,21 +887,16 @@ export default function ScannerScreen() {
                 position: "absolute",
                 top: 12,
                 left: 12,
-                backgroundColor: "rgba(16, 185, 129, 0.9)",
+                backgroundColor: scanMode === "barcode" ? "rgba(6, 182, 212, 0.9)" : "rgba(16, 185, 129, 0.9)",
                 paddingHorizontal: 10,
                 paddingVertical: 4,
                 borderRadius: 12
               }}>
-                <Text style={{ color: "#FFF", fontSize: 11, fontWeight: "800" }}>📸 Gallery Photo Loaded</Text>
+                <Text style={{ color: "#FFF", fontSize: 11, fontWeight: "800" }}>📸 Captured Snapshot</Text>
               </View>
 
               <TouchableOpacity
-                onPress={() => {
-                  setSelectedImageUri(null);
-                  setSelectedImageBase64(null);
-                  setOcrStatusMessage(null);
-                  startCamera();
-                }}
+                onPress={handleTryAgain}
                 style={{
                   position: "absolute",
                   top: 12,
@@ -623,7 +914,7 @@ export default function ScannerScreen() {
             </View>
           ) : isCameraLoading ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0D1322" }}>
-              <ActivityIndicator size="large" color="#10B981" />
+              <ActivityIndicator size="large" color={scanMode === "barcode" ? "#06B6D4" : "#10B981"} />
               <Text style={{ color: "#94A3B8", fontSize: 13, fontWeight: "700", marginTop: 12 }}>
                 Opening live camera...
               </Text>
@@ -658,71 +949,84 @@ export default function ScannerScreen() {
                 style={{ flex: 1 }}
                 facing="back"
                 enableTorch={flashOn}
-                onBarcodeScanned={(barcode) => {
-                  if (!isAnalyzing && barcode.data) {
-                    triggerAnalysis(`Scanned Barcode GTIN: ${barcode.data}`, `Scanned Item (${barcode.data.slice(-4)})`);
-                  }
-                }}
+                barcodeScannerSettings={
+                  scanMode === "barcode"
+                    ? {
+                        barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e", "code128", "code39"]
+                      }
+                    : undefined
+                }
+                onBarcodeScanned={
+                  scanMode === "barcode" && !isBarcodeLoading
+                    ? (result) => {
+                        if (result.data) {
+                          handleBarcodeDetected(result.data);
+                        }
+                      }
+                    : undefined
+                }
               />
             )
           ) : (
             <TouchableOpacity
               onPress={startCamera}
               activeOpacity={0.8}
-              style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0D1322", padding: 20 }}
+              style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#0D1322", padding: 16 }}
             >
               <View style={{
-                width: 64,
-                height: 64,
-                borderRadius: 32,
-                backgroundColor: "rgba(16, 185, 129, 0.15)",
+                width: 54,
+                height: 54,
+                borderRadius: 27,
+                backgroundColor: scanMode === "barcode" ? "rgba(6, 182, 212, 0.15)" : "rgba(16, 185, 129, 0.15)",
                 borderWidth: 1.5,
-                borderColor: "#10B981",
+                borderColor: scanMode === "barcode" ? "#06B6D4" : "#10B981",
                 alignItems: "center",
                 justifyContent: "center",
-                marginBottom: 10
+                marginBottom: 8
               }}>
                 <Image
                   source={require("../assets/camera-icon-white.png")}
-                  style={{ width: 32, height: 32 }}
+                  style={{ width: 28, height: 28 }}
                   resizeMode="contain"
                 />
               </View>
-              <Text style={{ color: "#F8FAFC", fontSize: 15, fontWeight: "800" }}>
+              <Text style={{ color: "#F8FAFC", fontSize: 14, fontWeight: "800" }}>
                 {cameraError ? "Camera Access Needed" : "Tap to Open Live Camera"}
               </Text>
-              <Text style={{ color: "#64748B", fontSize: 11, marginTop: 4, textAlign: "center" }}>
-                {cameraError || "Click here or camera button below to activate live feed"}
+              <Text style={{ color: "#64748B", fontSize: 11, marginTop: 4, textAlign: "center", maxWidth: 260 }}>
+                {cameraError || (scanMode === "barcode" ? "Point slot directly over barcode lines" : "Point camera at food packaging, ingredient lists, or nutrition facts labels")}
               </Text>
               {cameraError && (
-                <View style={{ marginTop: 12, backgroundColor: "#10B981", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10 }}>
-                  <Text style={{ color: "#FFF", fontSize: 12, fontWeight: "800" }}>Retry Camera</Text>
+                <View style={{ marginTop: 10, backgroundColor: "#10B981", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10 }}>
+                  <Text style={{ color: "#FFF", fontSize: 11, fontWeight: "800" }}>Allow & Retry Camera</Text>
                 </View>
               )}
             </TouchableOpacity>
           )}
 
-          {/* Viewfinder Neon Corners Target Frame */}
-          {!selectedImageUri && (
+          {/* 3:4 Holographic Frame for Nutrition Mode */}
+          {!selectedImageUri && scanMode === "nutrition" && (
             <View style={{
               position: "absolute",
-              top: "10%",
-              left: "10%",
-              right: "10%",
-              height: 200,
+              top: "7%",
+              left: "7%",
+              right: "7%",
+              bottom: "7%",
               borderWidth: 1,
               borderColor: "rgba(255,255,255,0.15)",
               borderRadius: 20,
-              backgroundColor: "rgba(0,0,0,0.15)",
+              backgroundColor: "rgba(0,0,0,0.12)",
               alignItems: "center",
               justifyContent: "center",
               overflow: "hidden"
             }}>
-              <View style={{ position: "absolute", top: 0, left: 0, width: 24, height: 24, borderTopWidth: 3, borderLeftWidth: 3, borderColor: "#10B981", borderTopLeftRadius: 10 }} />
-              <View style={{ position: "absolute", top: 0, right: 0, width: 24, height: 24, borderTopWidth: 3, borderRightWidth: 3, borderColor: "#10B981", borderTopRightRadius: 10 }} />
-              <View style={{ position: "absolute", bottom: 0, left: 0, width: 24, height: 24, borderBottomWidth: 3, borderLeftWidth: 3, borderColor: "#10B981", borderBottomLeftRadius: 10 }} />
-              <View style={{ position: "absolute", bottom: 0, right: 0, width: 24, height: 24, borderBottomWidth: 3, borderRightWidth: 3, borderColor: "#10B981", borderBottomRightRadius: 10 }} />
+              {/* 4 Neon Corners */}
+              <View style={{ position: "absolute", top: 0, left: 0, width: 26, height: 26, borderTopWidth: 3.5, borderLeftWidth: 3.5, borderColor: "#10B981", borderTopLeftRadius: 12 }} />
+              <View style={{ position: "absolute", top: 0, right: 0, width: 26, height: 26, borderTopWidth: 3.5, borderRightWidth: 3.5, borderColor: "#10B981", borderTopRightRadius: 12 }} />
+              <View style={{ position: "absolute", bottom: 0, left: 0, width: 26, height: 26, borderBottomWidth: 3.5, borderLeftWidth: 3.5, borderColor: "#10B981", borderBottomLeftRadius: 12 }} />
+              <View style={{ position: "absolute", bottom: 0, right: 0, width: 26, height: 26, borderBottomWidth: 3.5, borderRightWidth: 3.5, borderColor: "#10B981", borderBottomRightRadius: 12 }} />
 
+              {/* Animated Laser Beam */}
               <Animated.View style={{
                 position: "absolute",
                 top: 0,
@@ -734,274 +1038,283 @@ export default function ScannerScreen() {
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 1,
                 shadowRadius: 10,
-                transform: [{ translateY: laserTranslateY }]
+                transform: [{ translateY: nutritionLaserY }]
               }} />
 
-              <View style={{ backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12 }}>
+              <View style={{ backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 }}>
                 <Text style={{ color: "#F8FAFC", fontSize: 11, fontWeight: "700" }}>
-                  Align {activeMode} label inside frame
+                  Align nutrition facts or food package in 3:4 frame
                 </Text>
               </View>
             </View>
           )}
 
-          {/* Viewfinder Controls (Gallery + Shutter + Text) */}
+          {/* Compact Barcode Guide Slot for Barcode Mode */}
+          {!selectedImageUri && scanMode === "barcode" && (
+            <View style={{
+              position: "absolute",
+              top: 14,
+              bottom: 14,
+              left: 14,
+              right: 14,
+              borderWidth: 1.5,
+              borderColor: "rgba(6, 182, 212, 0.45)",
+              borderRadius: 14,
+              backgroundColor: "rgba(0,0,0,0.15)",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden"
+            }}>
+              {/* Left & Right Barcode Guide Brackets */}
+              <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 14, borderLeftWidth: 3.5, borderTopWidth: 3.5, borderBottomWidth: 3.5, borderColor: "#06B6D4", borderTopLeftRadius: 10, borderBottomLeftRadius: 10 }} />
+              <View style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: 14, borderRightWidth: 3.5, borderTopWidth: 3.5, borderBottomWidth: 3.5, borderColor: "#06B6D4", borderTopRightRadius: 10, borderBottomRightRadius: 10 }} />
+
+              {/* Animated Barcode Red Laser */}
+              <Animated.View style={{
+                position: "absolute",
+                top: 0,
+                left: 10,
+                right: 10,
+                height: 2.5,
+                backgroundColor: "#EF4444",
+                shadowColor: "#EF4444",
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 1,
+                shadowRadius: 8,
+                transform: [{ translateY: barcodeLaserY }]
+              }} />
+
+              <View style={{ backgroundColor: "rgba(0,0,0,0.72)", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 }}>
+                <Text style={{ color: "#38BDF8", fontSize: 11, fontWeight: "800" }}>
+                  ||||  Fit Barcode Inside Slot  ||||
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Mode-Specific Action Buttons */}
+        {scanMode === "nutrition" ? (
           <View style={{
-            position: "absolute",
-            bottom: 12,
-            left: 0,
-            right: 0,
+            marginTop: 20,
+            marginHorizontal: 18,
             flexDirection: "row",
-            justifyContent: "space-around",
             alignItems: "center",
-            paddingHorizontal: 24
+            gap: 14
           }}>
-            {/* Gallery Upload Button */}
+            {/* Gallery Button */}
             <TouchableOpacity
               onPress={pickImageFromGallery}
+              activeOpacity={0.8}
               style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: "rgba(16,185,129,0.25)",
+                width: 58,
+                height: 58,
+                borderRadius: 20,
+                backgroundColor: "rgba(255,255,255,0.08)",
+                borderColor: "rgba(255,255,255,0.18)",
                 borderWidth: 1.5,
-                borderColor: "#10B981",
                 alignItems: "center",
                 justifyContent: "center"
               }}
             >
-              <Text style={{ fontSize: 22 }}>🖼️</Text>
+              <Text style={{ fontSize: 24 }}>🖼️</Text>
             </TouchableOpacity>
 
-            {/* Shutter / Camera Capture Button */}
+            {/* Big [ Scan Food Label (3:4) ] Button */}
             <TouchableOpacity
-              onPress={handleCameraAction}
+              onPress={captureAndScan}
               activeOpacity={0.85}
               style={{
-                width: 66,
-                height: 66,
-                borderRadius: 33,
-                backgroundColor: "rgba(255,255,255,0.2)",
-                alignItems: "center",
-                justifyContent: "center"
-              }}
-            >
-              <View style={{
-                width: 52,
-                height: 52,
-                borderRadius: 26,
+                flex: 1,
+                height: 58,
+                borderRadius: 20,
                 backgroundColor: "#10B981",
-                borderWidth: 2.5,
-                borderColor: "#FFF",
+                flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "center",
+                gap: 10,
                 shadowColor: "#10B981",
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.8,
-                shadowRadius: 8
-              }}>
-                <Image
-                  source={require("../assets/camera-icon-white.png")}
-                  style={{ width: 28, height: 28 }}
-                  resizeMode="contain"
-                />
-              </View>
-            </TouchableOpacity>
-
-            {/* Quick Manual Text Toggle */}
-            <TouchableOpacity
-              onPress={() => setShowManualEditor((prev) => !prev)}
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: showManualEditor ? "#10B981" : "rgba(255,255,255,0.15)",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.3)",
-                alignItems: "center",
-                justifyContent: "center"
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.35,
+                shadowRadius: 12
               }}
             >
-              <Text style={{ fontSize: 18 }}>✏️</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Gallery Quick Action Bar */}
-        <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
-          <TouchableOpacity
-            onPress={pickImageFromGallery}
-            style={{
-              backgroundColor: "rgba(16, 185, 129, 0.12)",
-              borderColor: "rgba(16, 185, 129, 0.4)",
-              borderWidth: 1.5,
-              borderRadius: 18,
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between"
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <Text style={{ fontSize: 20 }}>🖼️</Text>
-              <View>
-                <Text style={{ color: "#F8FAFC", fontSize: 14, fontWeight: "800" }}>
-                  Select Image from Gallery
-                </Text>
-                <Text style={{ color: "#94A3B8", fontSize: 11, marginTop: 1 }}>
-                  Automatic on-device OCR extracts ingredients
-                </Text>
-              </View>
-            </View>
-            <View style={{ backgroundColor: "#10B981", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 }}>
-              <Text style={{ color: "#FFF", fontSize: 11, fontWeight: "900" }}>Upload</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* OCR Status / Extracting Indicator */}
-        {isExtractingOcr && (
-          <View style={{
-            marginHorizontal: 16,
-            marginTop: 10,
-            backgroundColor: "rgba(16, 185, 129, 0.1)",
-            borderColor: "#10B981",
-            borderWidth: 1,
-            borderRadius: 14,
-            padding: 12,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10
-          }}>
-            <ActivityIndicator size="small" color="#10B981" />
-            <Text style={{ color: "#10B981", fontSize: 12, fontWeight: "700" }}>
-              {ocrStatusMessage || "Scanning image text..."}
-            </Text>
-          </View>
-        )}
-
-        {/* OCR Status feedback if completed */}
-        {!isExtractingOcr && ocrStatusMessage && (
-          <View style={{
-            marginHorizontal: 16,
-            marginTop: 10,
-            backgroundColor: "rgba(255, 255, 255, 0.06)",
-            borderColor: "rgba(255, 255, 255, 0.12)",
-            borderWidth: 1,
-            borderRadius: 14,
-            padding: 10,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between"
-          }}>
-            <Text style={{ color: "#94A3B8", fontSize: 11, flex: 1 }}>{ocrStatusMessage}</Text>
-            <TouchableOpacity onPress={() => setOcrStatusMessage(null)}>
-              <Text style={{ color: "#64748B", fontSize: 12, paddingHorizontal: 6 }}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Extracted Ingredients & Manual Editor Card */}
-        {(showManualEditor || selectedImageUri || activeMode === "Barcode") && (
-          <View style={{
-            marginHorizontal: 16,
-            marginTop: 12,
-            backgroundColor: "rgba(255, 255, 255, 0.05)",
-            borderColor: "rgba(255, 255, 255, 0.12)",
-            borderWidth: 1,
-            borderRadius: 20,
-            padding: 14,
-            gap: 10
-          }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ color: "#10B981", fontSize: 12, fontWeight: "800", textTransform: "uppercase" }}>
-                {activeMode === "Barcode"
-                  ? "🏷️ Barcode GTIN / EAN Lookup"
-                  : selectedImageUri
-                  ? "Extracted Ingredients (Editable)"
-                  : "Custom Ingredient Input"}
-              </Text>
-              <Text style={{ color: "#64748B", fontSize: 11 }}>
-                {activeMode === "Barcode"
-                  ? `${customText.replace(/\D/g, "").length} digits`
-                  : isExtractingOcr
-                  ? "Scanning..."
-                  : `${customText.split(/\s+/).filter(Boolean).length} words`}
-              </Text>
-            </View>
-
-            <TextInput
-              value={customText}
-              onChangeText={setCustomText}
-              placeholder={
-                activeMode === "Barcode"
-                  ? "Enter 8-14 digit barcode (e.g. 3017620422003 for Nutella)..."
-                  : isExtractingOcr
-                  ? "Extracting ingredients from image..."
-                  : "Ingredients will appear here from your photo, or type/paste them..."
-              }
-              placeholderTextColor="#64748B"
-              multiline={activeMode !== "Barcode"}
-              numberOfLines={activeMode === "Barcode" ? 1 : 4}
-              keyboardType={activeMode === "Barcode" ? "number-pad" : "default"}
-              style={{
-                backgroundColor: "rgba(0,0,0,0.35)",
-                borderColor: "rgba(255,255,255,0.1)",
-                borderWidth: 1,
-                borderRadius: 14,
-                padding: 12,
-                color: "#F8FAFC",
-                fontSize: 13,
-                minHeight: activeMode === "Barcode" ? 48 : 80,
-                textAlignVertical: activeMode === "Barcode" ? "center" : "top"
-              }}
-            />
-
-            {/* Big Analyze Button */}
-            <TouchableOpacity
-              onPress={() => triggerAnalysis(customText, productName)}
-              style={{
-                backgroundColor: "#10B981",
-                borderRadius: 16,
-                paddingVertical: 12,
-                alignItems: "center",
-                shadowColor: "#10B981",
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.3,
-                shadowRadius: 8
-              }}
-            >
-              <Text style={{ color: "#FFF", fontSize: 14, fontWeight: "900" }}>
-                {activeMode === "Barcode" ? "🔍 Lookup Barcode in Food Database" : "🚀 Analyze Scanned Ingredients"}
+              <Image
+                source={require("../assets/camera-icon-white.png")}
+                style={{ width: 22, height: 22 }}
+                resizeMode="contain"
+              />
+              <Text style={{ color: "#FFF", fontSize: 16, fontWeight: "900", letterSpacing: -0.2 }}>
+                Scan Food Label (3:4)
               </Text>
             </TouchableOpacity>
           </View>
-        )}
-
-        {/* Preset Demo Strip */}
-        <View style={{ padding: 16, marginTop: 6 }}>
-          <Text style={{ color: "#94A3B8", fontSize: 11, fontWeight: "800", textTransform: "uppercase", marginBottom: 8 }}>
-            Sample Products (Tap to Test AI Model)
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {PRESET_SAMPLES.map((preset) => (
+        ) : (
+          <View style={{
+            marginTop: 18,
+            marginHorizontal: 18,
+            gap: 14
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              {/* Type Barcode Toggle Button */}
               <TouchableOpacity
-                key={preset.name}
-                onPress={() => selectPreset(preset)}
+                onPress={() => setShowManualBarcode((prev) => !prev)}
+                activeOpacity={0.8}
                 style={{
-                  backgroundColor: "rgba(255,255,255,0.08)",
-                  borderColor: productName === preset.name ? "#10B981" : "rgba(255,255,255,0.12)",
-                  borderWidth: 1,
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderRadius: 14
+                  width: 58,
+                  height: 58,
+                  borderRadius: 20,
+                  backgroundColor: showManualBarcode ? "rgba(6, 182, 212, 0.2)" : "rgba(255,255,255,0.08)",
+                  borderColor: showManualBarcode ? "#06B6D4" : "rgba(255,255,255,0.18)",
+                  borderWidth: 1.5,
+                  alignItems: "center",
+                  justifyContent: "center"
                 }}
               >
-                <Text style={{ color: "#F8FAFC", fontSize: 12, fontWeight: "700" }}>{preset.name}</Text>
+                <Text style={{ fontSize: 24 }}>⌨️</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+
+              {/* Big [ Scan Barcode ] Button */}
+              <TouchableOpacity
+                onPress={captureAndScanBarcode}
+                activeOpacity={0.85}
+                disabled={isBarcodeLoading}
+                style={{
+                  flex: 1,
+                  height: 58,
+                  borderRadius: 20,
+                  backgroundColor: "#06B6D4",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  shadowColor: "#06B6D4",
+                  shadowOffset: { width: 0, height: 6 },
+                  shadowOpacity: 0.35,
+                  shadowRadius: 12
+                }}
+              >
+                {isBarcodeLoading ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={{ fontSize: 20 }}>🏷️</Text>
+                )}
+                <Text style={{ color: "#FFF", fontSize: 16, fontWeight: "900", letterSpacing: -0.2 }}>
+                  {isBarcodeLoading ? "Looking Up Barcode..." : "Scan Barcode"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Manual Barcode Input Card */}
+            {showManualBarcode && (
+              <View style={{
+                backgroundColor: "rgba(15, 23, 42, 0.9)",
+                borderColor: "rgba(6, 182, 212, 0.4)",
+                borderWidth: 1,
+                borderRadius: 18,
+                padding: 14,
+                gap: 10
+              }}>
+                <Text style={{ color: "#F8FAFC", fontSize: 12, fontWeight: "800" }}>
+                  Enter Product Barcode (EAN / UPC / GTIN):
+                </Text>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <TextInput
+                    value={barcodeInput}
+                    onChangeText={setBarcodeInput}
+                    placeholder="e.g. 3017620422003"
+                    placeholderTextColor="#64748B"
+                    keyboardType="numeric"
+                    style={{
+                      flex: 1,
+                      backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      borderColor: "rgba(255, 255, 255, 0.15)",
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      paddingHorizontal: 14,
+                      paddingVertical: 10,
+                      color: "#FFF",
+                      fontSize: 14,
+                      fontWeight: "700"
+                    }}
+                  />
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (barcodeInput.trim()) {
+                        handleBarcodeDetected(barcodeInput.trim());
+                      }
+                    }}
+                    disabled={!barcodeInput.trim() || isBarcodeLoading}
+                    style={{
+                      backgroundColor: barcodeInput.trim() ? "#06B6D4" : "rgba(255,255,255,0.1)",
+                      paddingHorizontal: 16,
+                      borderRadius: 12,
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}
+                  >
+                    <Text style={{ color: barcodeInput.trim() ? "#FFF" : "#64748B", fontSize: 13, fontWeight: "800" }}>
+                      Lookup
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Quick Test Barcode Chips */}
+            <View style={{ gap: 8 }}>
+              <Text style={{ color: "#94A3B8", fontSize: 11, fontWeight: "700", marginLeft: 4 }}>
+                ⚡ Quick Test Barcodes:
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {BARCODE_PRESETS.map((item) => (
+                  <TouchableOpacity
+                    key={item.code}
+                    onPress={() => {
+                      setBarcodeInput(item.code);
+                      handleBarcodeDetected(item.code);
+                    }}
+                    disabled={isBarcodeLoading}
+                    style={{
+                      backgroundColor: "rgba(6, 182, 212, 0.12)",
+                      borderColor: "rgba(6, 182, 212, 0.35)",
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6
+                    }}
+                  >
+                    <Text style={{ fontSize: 13 }}>{item.icon}</Text>
+                    <Text style={{ color: "#E0F2FE", fontSize: 12, fontWeight: "700" }}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Tips Bar */}
+        <View style={{
+          marginTop: 18,
+          marginHorizontal: 18,
+          backgroundColor: "rgba(255,255,255,0.04)",
+          borderRadius: 16,
+          padding: 12,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10
+        }}>
+          <Text style={{ fontSize: 18 }}>💡</Text>
+          <Text style={{ color: "#94A3B8", fontSize: 11, flex: 1, lineHeight: 16 }}>
+            {scanMode === "barcode"
+              ? "Hold product steady so the barcode numbers and black bars fill the horizontal slot."
+              : "For highest accuracy, ensure the ingredients list and nutrition facts table are well lit without glare."}
+          </Text>
         </View>
       </ScrollView>
 

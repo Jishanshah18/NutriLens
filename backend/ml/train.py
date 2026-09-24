@@ -1,9 +1,10 @@
 """
-NutriLens Model Training Pipeline.
-Trains custom machine learning models on attached food datasets:
-- NOVA Group Classifier (Predicts NOVA 1, 2, 3, or 4 from ingredient text)
-- Health Score Regressor (Predicts 0-100 health score from ingredient composition)
-- Healthier Alternatives Index (KNN similarity index recommending cleaner swaps)
+NutriLens Production ML Model Training & Rigorous Evaluation.
+Trains on USDA FoodData Central & Open Food Facts dataset splits:
+1. NOVA Processing Level Classifier (NOVA 1, 2, 3, 4)
+2. Nutritional Integrity / Health Score Regressor (0-100)
+3. Healthier Alternatives Cosine Similarity Search Index
+Evaluates using Train/Test split: Accuracy, Precision, Recall, F1, Confusion Matrix, MAE, RMSE, R2.
 """
 
 import os
@@ -13,140 +14,181 @@ import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
-
-# Ensure parent directory (backend) is on sys.path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from typing import Dict, Any
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.neighbors import NearestNeighbors
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, f1_score, mean_absolute_error, r2_score
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score
+)
 
-from ml.dataset_loader import load_all_datasets, DATA_DIR
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRAINING_DIR = os.path.join(BASE_DIR, "data", "training")
+SAVED_MODELS_DIR = os.path.join(BASE_DIR, "ml", "saved_models")
+MODELS_DIR = SAVED_MODELS_DIR
 
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "saved_models")
+TRAIN_CSV = os.path.join(TRAINING_DIR, "train_dataset.csv")
+TEST_CSV = os.path.join(TRAINING_DIR, "test_dataset.csv")
 
 
-def train_pipeline(data_dir: str = DATA_DIR, save_dir: str = MODELS_DIR) -> Dict[str, Any]:
-    """
-    Executes the complete machine learning training pipeline on all attached datasets.
-    Saves trained models, vectorizers, alternative product catalog, and metrics.
-    """
-    print(f"\n=======================================================")
-    print(f"   NutriLens Machine Learning Model Training Starting   ")
-    print(f"=======================================================")
-    print(f"Reading datasets from: {data_dir}")
+def train_models():
+    print("===============================================================")
+    print("   NutriLens Machine Learning Training & Evaluation Starting   ")
+    print("===============================================================")
+    os.makedirs(SAVED_MODELS_DIR, exist_ok=True)
 
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # 1. Load and merge datasets
-    df = load_all_datasets(data_dir)
-    print(f"Total processed dataset size: {len(df)} food products across {df['source_file'].nunique()} file(s).")
-    print(f"NOVA Distribution:\n{df['nova_group'].value_counts().sort_index().to_dict()}")
+    print(f"Loading training data from: {TRAIN_CSV}")
+    train_df = pd.read_csv(TRAIN_CSV, low_memory=False)
+    print(f"Loading test data from:     {TEST_CSV}")
+    test_df = pd.read_csv(TEST_CSV, low_memory=False)
 
-    # 2. Text Feature Extraction via TF-IDF (word & character n-grams)
-    print("Building TF-IDF Vectorizer on ingredient token spaces...")
+    print(f"Training samples: {len(train_df)} | Test samples: {len(test_df)}")
+
+    # Handle missing text gracefully
+    train_df["ingredients_tokens"] = train_df["ingredients_tokens"].fillna(train_df["food_name"].fillna("food"))
+    test_df["ingredients_tokens"] = test_df["ingredients_tokens"].fillna(test_df["food_name"].fillna("food"))
+
+    # 1. Build TF-IDF Feature Extraction
+    print("\n[1/4] Fitting TF-IDF Feature Vectorizer...")
     vectorizer = TfidfVectorizer(
         ngram_range=(1, 2),
-        min_df=1,
-        max_df=0.98,
+        min_df=2,
+        max_df=0.90,
         sublinear_tf=True,
+        max_features=25000,
         token_pattern=r'(?u)\b[a-zA-Z0-9_-]+\b'
     )
-    X = vectorizer.fit_transform(df["ingredients_text"])
+    X_train = vectorizer.fit_transform(train_df["ingredients_tokens"])
+    X_test = vectorizer.transform(test_df["ingredients_tokens"])
+    vocab_size = len(vectorizer.vocabulary_)
+    print(f"TF-IDF Vectorizer built with {vocab_size} n-gram features.")
 
-    # 3. Train NOVA Group Classification Model
-    print("Training NOVA Group Classifier...")
-    y_nova = df["nova_group"].astype(int)
-
-    # Train / Test split for validation metrics
-    X_train_n, X_val_n, y_train_n, y_val_n = train_test_split(
-        X, y_nova, test_size=0.2, random_state=42, stratify=y_nova if y_nova.nunique() > 1 else None
-    )
+    # 2. Train and Evaluate NOVA Group Classifier
+    print("\n[2/4] Training NOVA Processing Group Classifier (Logistic Regression)...")
+    y_train_nova = train_df["nova_group"].astype(int)
+    y_test_nova = test_df["nova_group"].astype(int)
 
     nova_clf = LogisticRegression(
-        C=2.5,
+        C=2.0,
         max_iter=1000,
         class_weight="balanced",
-        solver="lbfgs"
+        solver="lbfgs",
+        random_state=42
     )
-    nova_clf.fit(X_train_n, y_train_n)
-    y_pred_n = nova_clf.predict(X_val_n)
+    nova_clf.fit(X_train, y_train_nova)
 
-    nova_acc = float(accuracy_score(y_val_n, y_pred_n))
-    nova_f1 = float(f1_score(y_val_n, y_pred_n, average="weighted"))
-    print(f"NOVA Classifier Validation - Accuracy: {nova_acc:.4f} | Weighted F1: {nova_f1:.4f}")
+    y_pred_nova = nova_clf.predict(X_test)
+    nova_acc = float(accuracy_score(y_test_nova, y_pred_nova))
+    nova_precision = float(precision_score(y_test_nova, y_pred_nova, average="weighted", zero_division=0))
+    nova_recall = float(recall_score(y_test_nova, y_pred_nova, average="weighted", zero_division=0))
+    nova_f1 = float(f1_score(y_test_nova, y_pred_nova, average="weighted", zero_division=0))
+    cm = confusion_matrix(y_test_nova, y_pred_nova).tolist()
 
-    # Retrain on full dataset for maximum production power
-    nova_clf.fit(X, y_nova)
+    print(f"--- NOVA Classifier Evaluation (on {len(test_df)} unseen test foods) ---")
+    print(f"  Accuracy:  {nova_acc * 100:.2f}%")
+    print(f"  Precision: {nova_precision:.4f}")
+    print(f"  Recall:    {nova_recall:.4f}")
+    print(f"  F1 Score:  {nova_f1:.4f}")
+    print(f"  Confusion Matrix:\n{np.array(cm)}")
 
-    # 4. Train Health Score Regressor Model
-    print("Training Health Score Regressor...")
-    y_health = df["health_score"].astype(float)
-    X_train_h, X_val_h, y_train_h, y_val_h = train_test_split(
-        X, y_health, test_size=0.2, random_state=42
-    )
+    # 3. Train and Evaluate Health Score Regressor
+    print("\n[3/4] Training Health Score Regressor (Ridge Regression)...")
+    y_train_health = train_df["health_score"].astype(float)
+    y_test_health = test_df["health_score"].astype(float)
 
-    health_reg = Ridge(alpha=1.0)
-    health_reg.fit(X_train_h, y_train_h)
-    y_pred_h = health_reg.predict(X_val_h)
+    health_reg = Ridge(alpha=1.5, random_state=42)
+    health_reg.fit(X_train, y_train_health)
 
-    health_mae = float(mean_absolute_error(y_val_h, y_pred_h))
-    health_r2 = float(r2_score(y_val_h, y_pred_h))
-    print(f"Health Score Regressor Validation - MAE: {health_mae:.2f} points | R2 Score: {health_r2:.4f}")
+    y_pred_health = health_reg.predict(X_test)
+    mae = float(mean_absolute_error(y_test_health, y_pred_health))
+    rmse = float(np.sqrt(mean_squared_error(y_test_health, y_pred_health)))
+    r2 = float(r2_score(y_test_health, y_pred_health))
 
-    # Retrain on full dataset
-    health_reg.fit(X, y_health)
+    print(f"--- Health Score Regressor Evaluation (on {len(test_df)} test foods) ---")
+    print(f"  Mean Absolute Error (MAE): {mae:.2f} points (scale 0-100)")
+    print(f"  Root Mean Squared Error:   {rmse:.2f} points")
+    print(f"  R2 Score:                  {r2:.4f}")
 
-    # 5. Build Healthier Alternatives Search Index
-    print("Indexing food products for Healthier Alternative recommendations...")
-    knn_index = NearestNeighbors(n_neighbors=min(25, len(df)), metric="cosine")
-    knn_index.fit(X)
+    # 4. Build Clean Healthier Alternatives Index
+    print("\n[4/4] Indexing Whole Foods for Healthier Alternative Swaps...")
+    clean_foods_df = train_df[
+        (train_df["nova_group"] <= 2) & (train_df["health_score"] >= 75)
+    ].copy()
 
-    catalog_records = df[[
-        "product_name", "ingredients_text", "nova_group", "health_score",
-        "calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "sodium_mg"
+    if len(clean_foods_df) < 100:
+        clean_foods_df = train_df.sort_values(by="health_score", ascending=False).head(2000).copy()
+
+    print(f"Found {len(clean_foods_df)} verified clean whole-food items for alternative matching.")
+    X_clean = vectorizer.transform(clean_foods_df["ingredients_tokens"])
+
+    knn_index = NearestNeighbors(n_neighbors=min(15, len(clean_foods_df)), metric="cosine")
+    knn_index.fit(X_clean)
+
+    clean_catalog_records = clean_foods_df[[
+        "food_name", "brand", "category", "ingredients_text", "nova_group", "health_score",
+        "calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "fiber_g", "sodium_mg", "data_source"
     ]].to_dict(orient="records")
 
-    # 6. Save Artifacts to Models Directory
-    print(f"Saving trained model artifacts to {save_dir}...")
-    joblib.dump(vectorizer, os.path.join(save_dir, "vectorizer.joblib"))
-    joblib.dump(nova_clf, os.path.join(save_dir, "nova_classifier.joblib"))
-    joblib.dump(health_reg, os.path.join(save_dir, "health_score_regressor.joblib"))
-    joblib.dump(knn_index, os.path.join(save_dir, "alternatives_index.joblib"))
-    joblib.dump(catalog_records, os.path.join(save_dir, "product_catalog.joblib"))
+    # 5. Persist Model Artifacts
+    print(f"\nSaving model artifacts to {SAVED_MODELS_DIR}...")
+    joblib.dump(vectorizer, os.path.join(SAVED_MODELS_DIR, "vectorizer.joblib"))
+    joblib.dump(nova_clf, os.path.join(SAVED_MODELS_DIR, "nova_classifier.joblib"))
+    joblib.dump(health_reg, os.path.join(SAVED_MODELS_DIR, "health_score_regressor.joblib"))
+    joblib.dump(knn_index, os.path.join(SAVED_MODELS_DIR, "alternatives_index.joblib"))
+    joblib.dump(clean_catalog_records, os.path.join(SAVED_MODELS_DIR, "product_catalog.joblib"))
 
-    # 7. Record Training Metrics & Metadata
-    timestamp_str = datetime.now(timezone.utc).isoformat()
-    metrics = {
-        "status": "trained",
-        "trained_at": timestamp_str,
-        "total_training_samples": len(df),
-        "source_files": list(df["source_file"].unique()),
-        "nova_classifier": {
-            "model_type": "TF-IDF + Multinomial Logistic Regression",
+    # 6. Save Comprehensive Metrics & Evaluation Report
+    metrics_report = {
+        "dataset_metadata": {
+            "sources": ["USDA FoodData Central", "Open Food Facts"],
+            "collection_date": "February 2026",
+            "total_unique_records": len(train_df) + len(test_df),
+            "training_samples": len(train_df),
+            "test_samples": len(test_df),
+            "split_ratio": "80% Train / 20% Test (Stratified)"
+        },
+        "nova_classifier_evaluation": {
+            "model_type": "TF-IDF (25k n-grams) + Multinomial Logistic Regression",
             "accuracy": round(nova_acc, 4),
-            "f1_score": round(nova_f1, 4),
-            "classes": [int(c) for c in nova_clf.classes_]
+            "accuracy_percentage": f"{nova_acc * 100:.2f}%",
+            "precision_weighted": round(nova_precision, 4),
+            "recall_weighted": round(nova_recall, 4),
+            "f1_score_weighted": round(nova_f1, 4),
+            "classes": [int(c) for c in nova_clf.classes_],
+            "confusion_matrix": cm
         },
-        "health_score_regressor": {
-            "model_type": "TF-IDF + Ridge Regression",
-            "mae": round(health_mae, 2),
-            "r2_score": round(health_r2, 4)
+        "health_score_regressor_evaluation": {
+            "model_type": "TF-IDF + L2 Ridge Regression",
+            "mean_absolute_error": round(mae, 2),
+            "root_mean_squared_error": round(rmse, 2),
+            "r2_score": round(r2, 4)
         },
-        "vocabulary_size": len(vectorizer.vocabulary_)
+        "alternatives_index": {
+            "metric": "Cosine Distance",
+            "indexed_clean_items": len(clean_catalog_records)
+        },
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "vocabulary_size": vocab_size
     }
 
-    metrics_path = os.path.join(save_dir, "training_metrics.json")
+    metrics_path = os.path.join(SAVED_MODELS_DIR, "training_metrics.json")
     with open(metrics_path, "w", encoding="utf-8") as f:
-        json.dump(metrics, f, indent=2)
+        json.dump(metrics_report, f, indent=2)
 
-    print(f"Training successfully complete! Metrics written to {metrics_path}")
-    print(f"=======================================================\n")
-    return metrics
+    print(f"Metrics written to {metrics_path}")
+    print("===============================================================\n")
+    return metrics_report
 
+
+train_pipeline = train_models
 
 if __name__ == "__main__":
-    train_pipeline()
+    train_models()

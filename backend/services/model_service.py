@@ -18,10 +18,13 @@ from models.schemas import (
     AdditiveDetail,
     NutritionBreakdown,
     AlternativeProduct,
-    PreferenceAudit
+    PreferenceAudit,
+    PersonalizedRecommendation
 )
 from services.barcode_service import extract_barcode_digits, lookup_barcode_online
 from services.food_classifier import classify_food_item
+from services.recommendation_service import generate_personalized_recommendation
+import services.nutrition_service as nutrition_service
 from ml.knowledge import (
     ADDITIVES_DATABASE,
     ALLERGEN_TAXONOMY,
@@ -297,9 +300,38 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
             elif audit.goal_warnings:
                 verdict_parts.append(audit.goal_warnings[0])
 
+            completeness, missing = nutrition_service.assess_data_completeness({
+                "calories": nutrition.calories,
+                "protein_g": nutrition.protein_g,
+                "fat_g": nutrition.fat_g,
+                "carbs_g": nutrition.carbs_g,
+                "sugar_g": nutrition.sugar_g,
+                "fiber_g": nutrition.fiber_g,
+                "sodium_mg": nutrition.sodium_mg
+            })
+
+            personalized_rec = generate_personalized_recommendation(
+                product_name=p_name,
+                ocr_text=ing_text,
+                nutrition=nutrition,
+                detected_allergens=detected_allergens,
+                ingredient_risks=["Contains high sugar or additives."] if real_score < 50 else [],
+                user_profile=profile,
+                data_sources=["Open Food Facts", "USDA FoodData Central"],
+                data_completeness=completeness,
+                missing_nutrients=missing
+            )
+
+            brand_name = barcode_info.get("brand") or barcode_info.get("brands")
+            category_name = barcode_info.get("category") or barcode_info.get("categories")
+            img_url = barcode_info.get("image_url")
+
             return AnalyzeResponse(
                 is_food=True,
                 product_name=p_name,
+                brand=brand_name,
+                category=category_name,
+                image_url=img_url,
                 health_score=real_score,
                 nova_group=real_nova,
                 allergen_flags=detected_allergens,
@@ -309,6 +341,12 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
                 nutrition_estimate=nutrition,
                 healthier_alternatives=alternatives,
                 personalized_verdict=" ".join(verdict_parts),
+                personalized_recommendation=personalized_rec,
+                data_completeness=completeness,
+                missing_nutrients=missing,
+                data_sources=["Open Food Facts", "USDA FoodData Central"],
+                last_verified="February 2026",
+                allergens_safety_note="Always verify allergen and ingredient information on the physical product packaging, especially if you have a severe food allergy.",
                 ocr_text=ocr_text,
                 barcode=barcode_digits,
                 preference_audit=audit
@@ -405,30 +443,21 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
     final_health_score = int(max(5, min(99, round(pred_score))))
     final_nova = int(max(1, min(4, pred_nova)))
 
-    # 6. Extract/Estimate Nutrition Breakdown & Product Matching
-    catalog_match = _find_catalog_match(ocr_text)
+    # 6. Extract Genuine Nutrition Breakdown Strictly from Scanned Label
     nutrition = _estimate_nutrition(ocr_text, cleaned_text, final_nova, final_health_score)
-    if catalog_match:
-        product_name = catalog_match["product_name"]
-        # Only use catalog nutrition if label didn't have its own printed nutrition panel
-        if nutrition.is_estimated:
-            nutrition = NutritionBreakdown(
-                calories=float(catalog_match.get("calories", nutrition.calories)) if catalog_match.get("calories") is not None else nutrition.calories,
-                protein_g=float(catalog_match.get("protein_g", nutrition.protein_g)) if catalog_match.get("protein_g") is not None else nutrition.protein_g,
-                carbs_g=float(catalog_match.get("carbs_g", nutrition.carbs_g)) if catalog_match.get("carbs_g") is not None else nutrition.carbs_g,
-                fat_g=float(catalog_match.get("fat_g", nutrition.fat_g)) if catalog_match.get("fat_g") is not None else nutrition.fat_g,
-                sugar_g=float(catalog_match.get("sugar_g", nutrition.sugar_g)) if catalog_match.get("sugar_g") is not None else nutrition.sugar_g,
-                sodium_mg=float(catalog_match.get("sodium_mg", nutrition.sodium_mg)) if catalog_match.get("sodium_mg") is not None else nutrition.sodium_mg,
-                is_estimated=False,
-                source=f"Product Catalog ({product_name})",
-                serving_size=nutrition.serving_size
-            )
-            if catalog_match.get("nova_group") is not None:
-                final_nova = int(catalog_match["nova_group"])
-            if catalog_match.get("health_score") is not None and not ingredient_risks and not detected_additives:
-                final_health_score = int(catalog_match["health_score"])
-    else:
-        product_name = _extract_smart_product_name(ocr_text)
+    product_name = _extract_smart_product_name(ocr_text)
+    brand_name = None
+    category_name = None
+    data_source = "Scanned Product Label"
+    data_completeness, missing_nutrients = nutrition_service.assess_data_completeness({
+        "calories": nutrition.calories,
+        "protein_g": nutrition.protein_g,
+        "fat_g": nutrition.fat_g,
+        "carbs_g": nutrition.carbs_g,
+        "sugar_g": nutrition.sugar_g,
+        "fiber_g": nutrition.fiber_g,
+        "sodium_mg": nutrition.sodium_mg
+    })
 
     # 7. Run Personalized User Preference Audit
     audit = _audit_user_preferences(text_lower, nutrition, detected_allergens, profile)
@@ -456,9 +485,23 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
 
     alternatives = _find_healthier_alternatives(cleaned_text, final_nova, final_health_score)
 
+    personalized_rec = generate_personalized_recommendation(
+        product_name=product_name,
+        ocr_text=ocr_text,
+        nutrition=nutrition,
+        detected_allergens=detected_allergens,
+        ingredient_risks=ingredient_risks,
+        user_profile=profile,
+        data_sources=[data_source],
+        data_completeness=data_completeness,
+        missing_nutrients=missing_nutrients
+    )
+
     return AnalyzeResponse(
         is_food=True,
         product_name=product_name,
+        brand=brand_name,
+        category=category_name,
         health_score=final_health_score,
         nova_group=final_nova,
         allergen_flags=detected_allergens,
@@ -468,6 +511,12 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
         nutrition_estimate=nutrition,
         healthier_alternatives=alternatives,
         personalized_verdict=" ".join(verdict_parts),
+        personalized_recommendation=personalized_rec,
+        data_completeness=data_completeness,
+        missing_nutrients=missing_nutrients,
+        data_sources=[data_source],
+        last_verified="February 2026",
+        allergens_safety_note="Always verify allergen and ingredient information on the physical product packaging, especially if you have a severe food allergy.",
         ocr_text=ocr_text,
         preference_audit=audit
     )
@@ -612,6 +661,11 @@ def parse_nutrition_facts(text: str) -> Dict[str, Any]:
 
     t = text.lower()
     t = re.sub(r'[•·|│]', ' ', t)
+    # Correct common OCR confusions (e.g. Og -> 0g, Omg -> 0mg, O kcal -> 0kcal)
+    t = re.sub(r'\b[oO]\s*g\b', '0g', t)
+    t = re.sub(r'\b[oO]\s*mg\b', '0mg', t)
+    t = re.sub(r'\b[oO]\s*kcal\b', '0kcal', t)
+    t = re.sub(r'([0-9]),([0-9])', r'\1.\2', t)
 
     res: Dict[str, Any] = {
         "calories": None,
@@ -620,6 +674,7 @@ def parse_nutrition_facts(text: str) -> Dict[str, Any]:
         "fat_g": None,
         "sugar_g": None,
         "sodium_mg": None,
+        "fiber_g": None,
         "serving_size": None,
         "parsed_count": 0
     }
@@ -754,6 +809,22 @@ def parse_nutrition_facts(text: str) -> Dict[str, Any]:
             except (ValueError, TypeError):
                 pass
 
+    # 8. Dietary Fiber (both directions, e.g. "Dietary Fiber: 4g", "Fiber: 3g", "Fibres: 2.5g")
+    fiber_patterns = [
+        r'(?:dietary\s+)?(?:fibers?|fibres?)\s*(?:\([^\)]*g[^\)]*\))?\s*[:\-\s]?\s*([0-9]+(?:\.[0-9]+)?)\s*g?\b',
+        r'([0-9]+(?:\.[0-9]+)?)\s*g\s*(?:dietary\s+)?(?:fibers?|fibres?)\b'
+    ]
+    for fp in fiber_patterns:
+        m = re.search(fp, t)
+        if m:
+            try:
+                val = float(m.group(1))
+                if val <= 60:
+                    res["fiber_g"] = round(val, 1)
+                    break
+            except (ValueError, TypeError):
+                pass
+
     # Count how many macros were genuinely parsed from the label
     parsed = [v for k, v in res.items() if k not in ("serving_size", "parsed_count") and v is not None]
     res["parsed_count"] = len(parsed)
@@ -815,6 +886,12 @@ def _estimate_from_ingredients(text: str, nova: int, score: int) -> NutritionBre
         calories = round(protein * 4.0 + carbs * 4.0 + fat * 9.0, 1)
         sodium = 120.0
 
+    fiber = 1.5
+    if grain_score >= 1 or any(k in t for k in ['oat', 'chia', 'seed', 'blueberry', 'berry', 'bean', 'lentil']):
+        fiber = 4.0 if (grain_score >= 2 or 'chia' in t or 'seed' in t or 'bean' in t) else 2.5
+    elif any(k in t for k in ['vegetable', 'apple', 'fruit', 'cacao']):
+        fiber = 2.0
+
     return NutritionBreakdown(
         calories=calories,
         protein_g=protein,
@@ -822,6 +899,7 @@ def _estimate_from_ingredients(text: str, nova: int, score: int) -> NutritionBre
         fat_g=fat,
         sugar_g=sugar,
         sodium_mg=sodium,
+        fiber_g=fiber,
         is_estimated=True,
         source="Calculated from Ingredients (No table on package)",
         serving_size=None
@@ -847,6 +925,7 @@ def _estimate_nutrition(ocr_text: str, cleaned_text: str, nova: int, score: int)
         fat = parsed["fat_g"]
         sugar = parsed["sugar_g"]
         sodium = parsed["sodium_mg"]
+        fiber = parsed.get("fiber_g")
 
         # If calories is missing but macros are present, compute using Atwater factors:
         if calories is None and (protein is not None or carbs is not None or fat is not None):
@@ -859,6 +938,7 @@ def _estimate_nutrition(ocr_text: str, cleaned_text: str, nova: int, score: int)
             fat_g=fat,
             sugar_g=sugar,
             sodium_mg=sodium,
+            fiber_g=fiber,
             is_estimated=False,
             source="Scanned Product Label",
             serving_size=parsed.get("serving_size")

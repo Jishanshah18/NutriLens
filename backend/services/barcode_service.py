@@ -25,6 +25,95 @@ def extract_barcode_digits(text: str) -> Optional[str]:
     return None
 
 
+def decode_barcode_from_image(image_base64: str) -> Optional[str]:
+    """
+    Decodes barcode numbers (EAN-13, EAN-8, UPC-A, UPC-E, Code 128, etc.) from base64 image data.
+    Uses zxing-cpp with adaptive preprocessing, rotation passes, and OCR digit fallback.
+    """
+    if not image_base64:
+        return None
+
+    if "," in image_base64:
+        image_base64 = image_base64.split(",")[1]
+
+    try:
+        import base64
+        from io import BytesIO
+        from PIL import Image, ImageOps, ImageEnhance
+
+        image_bytes = base64.b64decode(image_base64)
+        img = Image.open(BytesIO(image_bytes))
+
+        # 1. Correct mobile EXIF orientation
+        try:
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
+
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+
+        # 2. Downscale huge photos (>1800px)
+        max_dim = max(img.width, img.height)
+        if max_dim > 1800:
+            scale = 1800.0 / max_dim
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
+
+        def _try_zxing(target_img):
+            try:
+                import zxingcpp
+                results = zxingcpp.read_barcodes(target_img)
+                for r in results:
+                    if r.text:
+                        clean = re.sub(r'\D', '', r.text)
+                        if len(clean) >= 8:
+                            return clean
+            except Exception:
+                pass
+            return None
+
+        # Pass 1: standard image
+        code = _try_zxing(img)
+        if code:
+            return code
+
+        # Pass 2: Grayscale and contrast enhanced
+        try:
+            gray = img.convert("L")
+            enh = ImageEnhance.Contrast(gray).enhance(2.0)
+            code = _try_zxing(enh)
+            if code:
+                return code
+        except Exception:
+            pass
+
+        # Pass 3: Rotations (90, 180, 270 degrees)
+        for angle in (90, 180, 270):
+            try:
+                rotated = img.rotate(angle, expand=True)
+                code = _try_zxing(rotated)
+                if code:
+                    return code
+            except Exception:
+                pass
+
+        # Pass 4: Fallback to OCR digit extraction
+        # Many barcode images have the digits printed beneath the bars
+        try:
+            from services.model_service import extract_text_from_image_base64
+            ocr_text = extract_text_from_image_base64(image_base64)
+            digits = extract_barcode_digits(ocr_text)
+            if digits:
+                return digits
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"Error in decode_barcode_from_image: {e}")
+
+    return None
+
+
 def lookup_barcode_online(barcode: str, timeout_seconds: float = 4.5) -> Dict[str, Any]:
     """
     Queries the OpenFoodFacts API for an EAN/UPC/GTIN barcode.
