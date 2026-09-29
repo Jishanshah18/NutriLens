@@ -207,5 +207,11 @@ BENEFICIAL_PATTERNS: List[Tuple[str, str, int]] = [
     ("turmeric", "Contains curcumin, a potent natural anti-inflammatory agent.", 8),
     ("ginger", "Natural digestive aid with anti-inflammatory gingerols.", 7),
     ("raw cacao", "High flavanol whole chocolate source supporting cardiovascular health.", 8),
+    ("blueberries", "Rich in anthocyanin polyphenols and antioxidant compounds.", 12),
+    ("blueberry", "Rich in anthocyanin polyphenols and antioxidant compounds.", 12),
+    ("berries", "Antioxidant-rich whole berries supporting cellular health.", 10),
+    ("lemon juice", "Natural citrus juice rich in vitamin C and polyphenols.", 8),
+    ("fresh fruit", "Natural whole fruit providing dietary vitamins and cellular antioxidants.", 12),
+    ("fruit", "Contains wholesome natural fruit ingredients.", 8),
     ("sea salt", "Unrefined salt retaining trace natural minerals.", 4),
 ]

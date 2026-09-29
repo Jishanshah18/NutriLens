@@ -2,6 +2,7 @@ export interface UserProfile {
   user_id?: string;
   email?: string;
   full_name?: string;
+  age?: number | null;
   health_conditions: string[];
   dietary_preferences: string[];
   allergies: string[];
@@ -145,13 +146,14 @@ export interface QuizSubmitResponse {
   new_streak: number;
 }
 export const DEFAULT_USER_PROFILE: UserProfile = {
-  user_id: "default_user",
-  email: "jishan@nutrilens.ai",
-  full_name: "Jishan Ahmed",
-  health_conditions: ["Diabetes", "High Blood Pressure"],
-  dietary_preferences: ["Low Sugar", "Diabetic-Friendly"],
-  allergies: ["Peanuts", "Lactose Intolerant"],
-  health_goals: ["Weight Loss", "Heart Health"],
+  user_id: "",
+  email: "",
+  full_name: "",
+  age: null,
+  health_conditions: [],
+  dietary_preferences: [],
+  allergies: [],
+  health_goals: [],
 };
 
 export interface UserAuthResponse {
@@ -173,20 +175,25 @@ export interface UserAccountInfo {
 
 export const getActiveUserId = (): string => {
   if (typeof window !== "undefined" && window.localStorage) {
-    return window.localStorage.getItem("nutrilens_active_user_id") || "default_user";
+    return window.localStorage.getItem("nutrilens_active_user_id") || "";
   }
-  return "default_user";
+  return "";
 };
 
 export const setActiveUserId = (userId: string): void => {
   if (typeof window !== "undefined" && window.localStorage) {
-    window.localStorage.setItem("nutrilens_active_user_id", userId);
+    if (userId) {
+      window.localStorage.setItem("nutrilens_active_user_id", userId);
+    } else {
+      window.localStorage.removeItem("nutrilens_active_user_id");
+    }
   }
 };
 
 export const getSavedUserProfile = (userId?: string): UserProfile | null => {
   if (typeof window !== "undefined" && window.localStorage) {
     const targetId = userId || getActiveUserId();
+    if (!targetId) return null;
     const raw = window.localStorage.getItem(`nutrilens_profile_${targetId}`);
     if (raw) {
       try {
@@ -199,8 +206,10 @@ export const getSavedUserProfile = (userId?: string): UserProfile | null => {
 
 export const setSavedUserProfile = (profile: UserProfile): void => {
   if (typeof window !== "undefined" && window.localStorage) {
-    const uid = profile.user_id || "default_user";
-    window.localStorage.setItem(`nutrilens_profile_${uid}`, JSON.stringify(profile));
+    const uid = profile.user_id;
+    if (uid) {
+      window.localStorage.setItem(`nutrilens_profile_${uid}`, JSON.stringify(profile));
+    }
   }
 };
 
@@ -303,6 +312,7 @@ export const registerUser = async (
   email: string,
   password: string,
   fullName: string,
+  age: number | null = null,
   healthConditions: string[] = [],
   dietaryPreferences: string[] = [],
   allergies: string[] = [],
@@ -316,6 +326,7 @@ export const registerUser = async (
       email,
       password,
       full_name: fullName,
+      age,
       health_conditions: healthConditions,
       dietary_preferences: dietaryPreferences,
       allergies: allergies,
@@ -366,6 +377,19 @@ export const logoutUser = async (): Promise<void> => {
   }
 };
 
+export const updateBackendUserPassword = async (userId: string, newPassword: string): Promise<void> => {
+  const url = getApiBaseUrl();
+  const response = await fetch(`${url}/user/password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, new_password: newPassword })
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: "Failed to update password in local store" }));
+    throw new Error(err.detail || "Failed to update password");
+  }
+};
+
 export const getUserList = async (): Promise<UserAccountInfo[]> => {
   try {
     const url = getApiBaseUrl();
@@ -373,13 +397,7 @@ export const getUserList = async (): Promise<UserAccountInfo[]> => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
   } catch (error) {
-    console.warn("Notice: Could not fetch user list from backend, using default demo accounts:", error);
-    return [
-      { id: "default_user", email: "jishan@nutrilens.ai", full_name: "Jishan Ahmed", health_conditions: ["Diabetes", "High Blood Pressure"] },
-      { id: "user_diabetes", email: "sarah.diabetes@nutrilens.ai", full_name: "Sarah Connor (Diabetes)", health_conditions: ["Diabetes"] },
-      { id: "user_hypertension", email: "marcus.bp@nutrilens.ai", full_name: "Marcus Vance (High BP)", health_conditions: ["High Blood Pressure"] },
-      { id: "user_clean", email: "elena.wellness@nutrilens.ai", full_name: "Elena Gomez (General Wellness)", health_conditions: [] }
-    ];
+    return [];
   }
 };
 

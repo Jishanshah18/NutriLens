@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Animated } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { sendChatMessage, getUserProfile, UserProfile } from "../lib/api";
+import { sendChatMessage, getUserProfile, UserProfile, getActiveUserId, getSavedUserProfile } from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
+import { useAuth } from "../lib/AuthContext";
 import { BottomNav } from "../components/BottomNav";
 
 interface MessageItem {
@@ -33,17 +34,23 @@ export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { colors, isDark } = useTheme();
+  const { userProfile: authProfile, userId } = useAuth();
 
   const [selectedLang, setSelectedLang] = useState("en");
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const cachedProf = getSavedUserProfile(getActiveUserId());
+  const [profile, setProfile] = useState<UserProfile | null>(authProfile || cachedProf || null);
+
+  const initialRawName = authProfile?.full_name?.trim() || cachedProf?.full_name?.trim() || "";
+  const initialFirstName = initialRawName ? initialRawName.split(" ")[0] : "";
+  const initialGreeting = initialFirstName ? `Hello ${initialFirstName}!` : "Hello!";
 
   const [messages, setMessages] = useState<MessageItem[]>([
     {
       id: "m-welcome",
       sender: "ai",
-      text: "Hello Jishan! I am your NutriLens AI Nutritionist. Ask me about any ingredient, preservative E-code, allergen risk, or diet optimization!",
+      text: `${initialGreeting} I am your NutriLens AI Nutritionist. Ask me about any ingredient, preservative E-code, allergen risk, or diet optimization!`,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     }
   ]);
@@ -55,14 +62,46 @@ export default function ChatScreen() {
   const dot2 = useRef(new Animated.Value(0.3)).current;
   const dot3 = useRef(new Animated.Value(0.3)).current;
 
+  // Dynamically update greeting text whenever user profile name is loaded
   useEffect(() => {
-    getUserProfile("default_user").then(setProfile).catch(() => {});
+    const rawName = authProfile?.full_name?.trim() || profile?.full_name?.trim() || "";
+    const name = rawName ? rawName.split(" ")[0] : "";
+    const greeting = name ? `Hello ${name}!` : "Hello!";
+    setMessages((prev) => {
+      if (prev.length > 0 && prev[0].id === "m-welcome") {
+        return [
+          {
+            ...prev[0],
+            text: `${greeting} I am your NutriLens AI Nutritionist. Ask me about any ingredient, preservative E-code, allergen risk, or diet optimization!`
+          },
+          ...prev.slice(1)
+        ];
+      }
+      return prev;
+    });
+  }, [authProfile?.full_name, profile?.full_name]);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      const activeId = userId || getActiveUserId();
+      const saved = getSavedUserProfile(activeId);
+      if (saved) {
+        setProfile(saved);
+      }
+      if (authProfile) {
+        setProfile(authProfile);
+      } else if (activeId) {
+        const remote = await getUserProfile(activeId).catch(() => null);
+        if (remote) setProfile(remote);
+      }
+    };
+    loadProfile();
 
     // Check if opened with an initial message from results screen
     if (params.initialMessage && typeof params.initialMessage === "string") {
       handleSend(params.initialMessage);
     }
-  }, [params.initialMessage]);
+  }, [authProfile, userId, params.initialMessage]);
 
   useEffect(() => {
     if (isTyping) {

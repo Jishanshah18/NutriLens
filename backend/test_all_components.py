@@ -87,10 +87,23 @@ def run_tests():
 
     # History router
     r = client.get("/api/history?user_id=default_user")
-    check("GET /api/history", r.status_code == 200 and isinstance(r.json(), list))
+    history_items = r.json() if r.status_code == 200 and isinstance(r.json(), list) else []
+    check("GET /api/history", r.status_code == 200 and isinstance(history_items, list))
 
-    r = client.get("/api/history/scan-1")
-    check("GET /api/history/{scan_id}", r.status_code == 200 and r.json().get("id") == "scan-1")
+    target_scan_id = history_items[0]["id"] if history_items else "scan-1"
+    if not history_items:
+        from services.history_service import save_scan_history
+        from models.schemas import AnalyzeResponse
+        test_item = save_scan_history(
+            AnalyzeResponse(is_food=True, product_name="Test Food", health_score=85, personalized_verdict="Healthy"),
+            "Test Ingredients",
+            user_id="default_user"
+        )
+        if test_item:
+            target_scan_id = test_item.id
+
+    r = client.get(f"/api/history/{target_scan_id}")
+    check("GET /api/history/{scan_id}", r.status_code == 200 and r.json().get("id") == target_scan_id)
 
     # Engagement router
     r = client.get("/api/engagement/quizzes")

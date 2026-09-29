@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView
+  SafeAreaView,
+  Modal
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useTheme } from "../lib/ThemeContext";
@@ -17,7 +18,7 @@ import { useAuth } from "../lib/AuthContext";
 export default function LoginScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
-  const { login, switchUser, isLoading } = useAuth();
+  const { login, resetPassword, isLoading } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,36 +26,12 @@ export default function LoginScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const DEMO_USERS = [
-    {
-      id: "default_user",
-      name: "Jishan Ahmed",
-      email: "jishan@nutrilens.ai",
-      conditions: "Diabetes & High Blood Pressure",
-      icon: "🥑"
-    },
-    {
-      id: "user_diabetes",
-      name: "Sarah Connor",
-      email: "sarah.diabetes@nutrilens.ai",
-      conditions: "Type 2 Diabetes (Sugar Radar)",
-      icon: "🩺"
-    },
-    {
-      id: "user_hypertension",
-      name: "Marcus Vance",
-      email: "marcus.bp@nutrilens.ai",
-      conditions: "High Blood Pressure (Sodium Radar)",
-      icon: "🩸"
-    },
-    {
-      id: "user_clean",
-      name: "Elena Gomez",
-      email: "elena.wellness@nutrilens.ai",
-      conditions: "Clean Eating & Whole Foods",
-      icon: "🌿"
-    }
-  ];
+  // Forgot Password modal state
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
+  const [forgotError, setForgotError] = useState<string | null>(null);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -75,26 +52,23 @@ export default function LoginScreen() {
     }
   };
 
-  const handleQuickDemoLogin = async (demoEmail: string, demoUid: string) => {
-    setEmail(demoEmail);
-    setPassword("password123");
-    setSubmitting(true);
-    setErrorMessage(null);
+  const handleResetPassword = async () => {
+    if (!forgotEmail.trim() || !forgotEmail.includes("@")) {
+      setForgotError("Please enter a valid email address.");
+      return;
+    }
+
+    setForgotSubmitting(true);
+    setForgotError(null);
+    setForgotMessage(null);
 
     try {
-      // Direct login with pre-seeded demo credentials
-      await login(demoEmail, "password123");
-      router.replace("/");
+      await resetPassword(forgotEmail.trim());
+      setForgotMessage("Password reset email sent! Check your inbox.");
     } catch (err: any) {
-      // Fallback switch profile if offline or local SQLite fallback
-      try {
-        await switchUser(demoUid);
-        router.replace("/");
-      } catch (innerErr: any) {
-        setErrorMessage(innerErr.message || "Demo login failed.");
-      }
+      setForgotError(err.message || "Failed to send reset email. Please try again.");
     } finally {
-      setSubmitting(false);
+      setForgotSubmitting(false);
     }
   };
 
@@ -135,39 +109,39 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => router.replace("/")}
+              onPress={() => router.push("/signup")}
               style={{ padding: 4 }}
             >
-              <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: "600" }}>Skip as Guest</Text>
+              <Text style={{ color: colors.emerald, fontSize: 13, fontWeight: "700" }}>Create Account</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Brand & Welcome Hero */}
-          <View style={{ alignItems: "center", marginBottom: 28 }}>
+          {/* Hero Branding */}
+          <View style={{ alignItems: "center", marginBottom: 32 }}>
             <View
               style={{
-                width: 72,
-                height: 72,
-                borderRadius: 36,
-                backgroundColor: `${colors.emerald}18`,
+                width: 64,
+                height: 64,
+                borderRadius: 32,
+                backgroundColor: `${colors.emerald}20`,
                 borderWidth: 2,
                 borderColor: colors.emerald,
                 alignItems: "center",
                 justifyContent: "center",
-                marginBottom: 14,
+                marginBottom: 16,
                 shadowColor: colors.emerald,
                 shadowOffset: { width: 0, height: 6 },
                 shadowOpacity: 0.35,
-                shadowRadius: 14,
+                shadowRadius: 12,
                 elevation: 6
               }}
             >
-              <Text style={{ fontSize: 36 }}>🥑</Text>
+              <Text style={{ fontSize: 30 }}>🔍</Text>
             </View>
 
             <Text
               style={{
-                fontSize: 26,
+                fontSize: 28,
                 fontWeight: "900",
                 color: colors.text,
                 letterSpacing: -0.5,
@@ -185,11 +159,11 @@ export default function LoginScreen() {
                 lineHeight: 20
               }}
             >
-              Sign in to scan foods with your personalized health radar for diabetes, hypertension & allergens.
+              Sign in to access your personalized scans and nutritional radar.
             </Text>
           </View>
 
-          {/* Form Card */}
+          {/* Login Form Container */}
           <View
             style={{
               backgroundColor: colors.card,
@@ -202,10 +176,10 @@ export default function LoginScreen() {
               shadowOpacity: 0.12,
               shadowRadius: 12,
               elevation: 4,
-              gap: 16
+              gap: 18
             }}
           >
-            {/* Error Notification Banner */}
+            {/* Error Notification */}
             {errorMessage && (
               <View
                 style={{
@@ -220,14 +194,7 @@ export default function LoginScreen() {
                 }}
               >
                 <Text style={{ fontSize: 16 }}>⚠️</Text>
-                <Text
-                  style={{
-                    color: colors.crimson,
-                    fontSize: 12,
-                    fontWeight: "700",
-                    flex: 1
-                  }}
-                >
+                <Text style={{ color: colors.crimson, fontSize: 13, fontWeight: "700", flex: 1 }}>
                   {errorMessage}
                 </Text>
               </View>
@@ -245,7 +212,7 @@ export default function LoginScreen() {
                   letterSpacing: 0.5
                 }}
               >
-                Email Address or User ID
+                Email Address
               </Text>
               <TextInput
                 value={email}
@@ -253,7 +220,7 @@ export default function LoginScreen() {
                   setEmail(val);
                   if (errorMessage) setErrorMessage(null);
                 }}
-                placeholder="e.g. jishan@nutrilens.ai"
+                placeholder="name@nutrilens.ai"
                 placeholderTextColor={colors.textDim}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -329,6 +296,20 @@ export default function LoginScreen() {
               </View>
             </View>
 
+            {/* Forgot Password Link */}
+            <View style={{ alignItems: "flex-end" }}>
+              <TouchableOpacity onPress={() => {
+                setForgotEmail(email);
+                setForgotMessage(null);
+                setForgotError(null);
+                setShowForgotModal(true);
+              }}>
+                <Text style={{ fontSize: 12, fontWeight: "700", color: colors.emerald }}>
+                  Forgot Password?
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Log In Button */}
             <TouchableOpacity
               onPress={handleLogin}
@@ -376,84 +357,124 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
-
-          {/* Quick Demo Accounts Selection */}
-          <View style={{ marginTop: 28 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 8 }}>
-              <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontWeight: "800",
-                  color: colors.textDim,
-                  textTransform: "uppercase",
-                  letterSpacing: 1
-                }}
-              >
-                Instant 1-Tap Demo Testing
-              </Text>
-              <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
-            </View>
-
-            <View style={{ gap: 8 }}>
-              {DEMO_USERS.map((demo) => (
-                <TouchableOpacity
-                  key={demo.id}
-                  onPress={() => handleQuickDemoLogin(demo.email, demo.id)}
-                  disabled={submitting}
-                  activeOpacity={0.75}
-                  style={{
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 16,
-                    padding: 12,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between"
-                  }}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
-                    <View
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 20,
-                        backgroundColor: `${colors.emerald}15`,
-                        alignItems: "center",
-                        justifyContent: "center"
-                      }}
-                    >
-                      <Text style={{ fontSize: 20 }}>{demo.icon}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "800", color: colors.text }}>
-                        {demo.name}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
-                        {demo.conditions}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View
-                    style={{
-                      backgroundColor: `${colors.emerald}15`,
-                      paddingHorizontal: 10,
-                      paddingVertical: 5,
-                      borderRadius: 10
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, fontWeight: "800", color: colors.emerald }}>
-                      Use Profile →
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Forgot Password Modal */}
+      <Modal
+        visible={showForgotModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowForgotModal(false)}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: "rgba(0,0,0,0.6)",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20
+        }}>
+          <View style={{
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 24,
+            padding: 24,
+            maxWidth: 420,
+            width: "100%",
+            gap: 16
+          }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>
+                Reset Password
+              </Text>
+              <TouchableOpacity onPress={() => setShowForgotModal(false)}>
+                <Text style={{ fontSize: 16, color: colors.textMuted }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, color: colors.textMuted, lineHeight: 18 }}>
+              Enter the email address associated with your NutriLens account. We will send a secure link to reset your password.
+            </Text>
+
+            {forgotError && (
+              <View style={{
+                backgroundColor: `${colors.crimson}18`,
+                borderColor: `${colors.crimson}50`,
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 10
+              }}>
+                <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "700" }}>{forgotError}</Text>
+              </View>
+            )}
+
+            {forgotMessage && (
+              <View style={{
+                backgroundColor: `${colors.emerald}18`,
+                borderColor: `${colors.emerald}50`,
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 10
+              }}>
+                <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "700" }}>{forgotMessage}</Text>
+              </View>
+            )}
+
+            <TextInput
+              value={forgotEmail}
+              onChangeText={setForgotEmail}
+              placeholder="name@example.com"
+              placeholderTextColor={colors.textDim}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              style={{
+                backgroundColor: colors.cardAlt,
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 14,
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                color: colors.text,
+                fontSize: 14
+              }}
+            />
+
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+              <TouchableOpacity
+                onPress={() => setShowForgotModal(false)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: 14,
+                  backgroundColor: colors.cardAlt,
+                  alignItems: "center"
+                }}
+              >
+                <Text style={{ color: colors.textMuted, fontWeight: "700", fontSize: 13 }}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleResetPassword}
+                disabled={forgotSubmitting}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: 14,
+                  backgroundColor: colors.emerald,
+                  alignItems: "center"
+                }}
+              >
+                {forgotSubmitting ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={{ color: "#FFF", fontWeight: "800", fontSize: 13 }}>Send Link</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

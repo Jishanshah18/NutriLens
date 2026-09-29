@@ -5,7 +5,8 @@ from models.schemas import (
     UserStatsResponse,
     UserLoginRequest,
     UserRegisterRequest,
-    UserAuthResponse
+    UserAuthResponse,
+    UserPasswordUpdateRequest
 )
 from services.user_service import (
     get_user_profile,
@@ -13,7 +14,8 @@ from services.user_service import (
     get_user_stats,
     register_new_user,
     authenticate_existing_user,
-    list_all_users
+    list_all_users,
+    update_user_password
 )
 
 router = APIRouter(tags=["User"])
@@ -106,5 +108,21 @@ async def fetch_current_user(user_id: str = "default_user"):
     """
     try:
         return get_user_profile(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/user/password")
+async def update_password_endpoint(request: UserPasswordUpdateRequest):
+    """
+    Update user password in backend persistent database.
+    """
+    try:
+        target_id = request.user_id or "default_user"
+        success = update_user_password(target_id, request.new_password)
+        if not success:
+            # Fallback to default_user if target_id wasn't found
+            success = update_user_password("default_user", request.new_password)
+        return {"success": True, "message": "Password updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

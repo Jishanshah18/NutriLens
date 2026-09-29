@@ -80,6 +80,8 @@ class PersistentStore:
                 cursor.execute("ALTER TABLE user_profiles ADD COLUMN email TEXT")
             if "full_name" not in existing_cols:
                 cursor.execute("ALTER TABLE user_profiles ADD COLUMN full_name TEXT")
+            if "age" not in existing_cols:
+                cursor.execute("ALTER TABLE user_profiles ADD COLUMN age INTEGER")
 
             # 2. Scan History Table
             cursor.execute("""
@@ -247,29 +249,7 @@ class PersistentStore:
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (acct["id"], st[0], st[1], st[2], st[3], st[4], now_date))
 
-            # Seed History if missing
-            cursor.execute("SELECT COUNT(*) FROM scan_history")
-            if cursor.fetchone()[0] == 0:
-                sample_history = [
-                    (
-                        "scan-1", "default_user", "Organic Almond Milk",
-                        datetime.now(timezone.utc).isoformat(), 88,
-                        json.dumps([]),
-                        "Excellent choice! Clean ingredients with low sugar.",
-                        "Almond milk, sea salt, calcium carbonate, vitamin D2"
-                    ),
-                    (
-                        "scan-2", "default_user", "Chocolate Chip Cookies",
-                        datetime.now(timezone.utc).isoformat(), 42,
-                        json.dumps(["Lactose"]),
-                        "High added sugars and saturated fat. Consume sparingly.",
-                        "Wheat flour, sugar, palm oil, chocolate chips, milk powder, soy lecithin, artificial flavor"
-                    )
-                ]
-                cursor.executemany("""
-                    INSERT INTO scan_history (id, user_id, product_name, scanned_at, health_score, allergen_flags, verdict_summary, ocr_text)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, sample_history)
+            # Do NOT seed fake scan history - user history must strictly contain only real scans
 
             # Seed Badges if missing
             cursor.execute("SELECT COUNT(*) FROM badges WHERE user_id = 'default_user'")
@@ -337,7 +317,7 @@ class PersistentStore:
                 }
 
             # Load Profiles
-            for row in cursor.execute("SELECT user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name FROM user_profiles"):
+            for row in cursor.execute("SELECT user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, age FROM user_profiles"):
                 self.profiles[row[0]] = {
                     "user_id": row[0],
                     "dietary_preferences": json.loads(row[1] or "[]"),
@@ -345,7 +325,8 @@ class PersistentStore:
                     "health_goals": json.loads(row[3] or "[]"),
                     "health_conditions": json.loads(row[4] or "[]") if len(row) > 4 and row[4] else [],
                     "email": row[5] if len(row) > 5 and row[5] else "",
-                    "full_name": row[6] if len(row) > 6 and row[6] else ""
+                    "full_name": row[6] if len(row) > 6 and row[6] else "",
+                    "age": row[7] if len(row) > 7 and row[7] is not None else None
                 }
 
             # Load History
@@ -405,8 +386,8 @@ class PersistentStore:
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, age, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     dietary_preferences=excluded.dietary_preferences,
                     allergies=excluded.allergies,
@@ -414,6 +395,7 @@ class PersistentStore:
                     health_conditions=excluded.health_conditions,
                     email=excluded.email,
                     full_name=excluded.full_name,
+                    age=excluded.age,
                     updated_at=excluded.updated_at
             """, (
                 user_id,
@@ -423,6 +405,7 @@ class PersistentStore:
                 json.dumps(profile_dict.get("health_conditions", [])),
                 profile_dict.get("email", ""),
                 profile_dict.get("full_name", ""),
+                profile_dict.get("age"),
                 datetime.now(timezone.utc).isoformat()
             ))
             conn.commit()
@@ -432,6 +415,7 @@ class PersistentStore:
         email: str,
         password: str,
         full_name: str,
+        age: Optional[int] = None,
         health_conditions: Optional[List[str]] = None,
         dietary_preferences: Optional[List[str]] = None,
         allergies: Optional[List[str]] = None,
@@ -467,8 +451,8 @@ class PersistentStore:
             goals = health_goals or []
 
             cursor.execute("""
-                INSERT OR REPLACE INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, age, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user_id,
                 json.dumps(prefs),
@@ -477,6 +461,7 @@ class PersistentStore:
                 json.dumps(conds),
                 email_clean,
                 full_name.strip(),
+                age,
                 now_iso
             ))
 
@@ -501,7 +486,8 @@ class PersistentStore:
             "health_goals": goals,
             "health_conditions": conds,
             "email": email_clean,
-            "full_name": full_name.strip()
+            "full_name": full_name.strip(),
+            "age": age
         }
         self.profiles[user_id] = prof
         return {"user_id": user_id, "email": email_clean, "full_name": full_name.strip(), "profile": prof}
@@ -547,6 +533,18 @@ class PersistentStore:
                 "full_name": user_name,
                 "profile": prof
             }
+
+    def update_password(self, user_id: str, new_password: str) -> bool:
+        pwd_hash = self._hash_password(new_password)
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE users 
+                SET password_hash = ? 
+                WHERE id = ? OR LOWER(email) = LOWER(?)
+            """, (pwd_hash, user_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_all_users(self) -> List[Dict[str, Any]]:
         user_list = []

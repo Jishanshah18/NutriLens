@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, RefreshControl } f
 import { useRouter } from "expo-router";
 import { getScanHistory, deleteScanItem, ScanHistoryItem } from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
+import { useAuth } from "../lib/AuthContext";
 import { BottomNav } from "../components/BottomNav";
 
 type FilterType = "all" | "clean" | "moderate" | "avoid" | "allergens";
@@ -10,6 +11,7 @@ type FilterType = "all" | "clean" | "moderate" | "avoid" | "allergens";
 export default function HistoryScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { userId, isAuthenticated } = useAuth();
 
   const [history, setHistory] = useState<ScanHistoryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -19,11 +21,17 @@ export default function HistoryScreen() {
 
   useEffect(() => {
     loadHistory();
-  }, []);
+  }, [userId]);
 
   const loadHistory = async () => {
+    if (!userId) {
+      setHistory([]);
+      setIsLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
     try {
-      const items = await getScanHistory("default_user", 50);
+      const items = await getScanHistory(userId, 100);
       setHistory(items);
     } catch (e) {
       console.warn("Notice loading scan history:", e);
@@ -296,6 +304,33 @@ export default function HistoryScreen() {
               </TouchableOpacity>
             );
           })
+        ) : history.length === 0 ? (
+          <View style={{
+            backgroundColor: colors.card,
+            padding: 36,
+            borderRadius: 24,
+            borderWidth: 1,
+            borderColor: colors.border,
+            alignItems: "center"
+          }}>
+            <Text style={{ fontSize: 40, marginBottom: 12 }}>🥑</Text>
+            <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>No food scans yet</Text>
+            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 6, textAlign: "center", lineHeight: 18 }}>
+              Scan a food label to see your history here.
+            </Text>
+            <TouchableOpacity
+              onPress={() => router.push("/scanner")}
+              style={{
+                backgroundColor: colors.emerald,
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                borderRadius: 16,
+                marginTop: 18
+              }}
+            >
+              <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "800" }}>Start First Scan</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={{
             backgroundColor: colors.card,

@@ -43,6 +43,7 @@ export default function SignUpScreen() {
   // Form Fields
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [age, setAge] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -75,6 +76,11 @@ export default function SignUpScreen() {
       setErrorMessage("Please enter a valid email address.");
       return;
     }
+    const parsedAge = age.trim() ? parseInt(age.trim(), 10) : null;
+    if (parsedAge !== null && (isNaN(parsedAge) || parsedAge < 1 || parsedAge > 120)) {
+      setErrorMessage("Please enter a valid age between 1 and 120.");
+      return;
+    }
     if (!password || password.length < 6) {
       setErrorMessage("Password must be at least 6 characters long.");
       return;
@@ -91,6 +97,7 @@ export default function SignUpScreen() {
       await register({
         fullName: fullName.trim(),
         email: email.trim(),
+        age: parsedAge,
         password,
         healthConditions: selectedConditions,
         healthGoals: selectedGoals,
@@ -254,7 +261,7 @@ export default function SignUpScreen() {
                     setFullName(val);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="e.g. Jishan Ahmed"
+                  placeholder="e.g. Alex Morgan"
                   placeholderTextColor={colors.textDim}
                   style={{
                     backgroundColor: colors.cardAlt,
@@ -285,6 +292,34 @@ export default function SignUpScreen() {
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  style={{
+                    backgroundColor: colors.cardAlt,
+                    borderColor: colors.border,
+                    borderWidth: 1,
+                    borderRadius: 14,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    color: colors.text,
+                    fontSize: 14
+                  }}
+                />
+              </View>
+
+              {/* Age Field */}
+              <View>
+                <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted, marginBottom: 4, textTransform: "uppercase" }}>
+                  Age (Powers clinical nutrition guidance)
+                </Text>
+                <TextInput
+                  value={age}
+                  onChangeText={(val) => {
+                    setAge(val.replace(/[^0-9]/g, ""));
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  placeholder="e.g. 28"
+                  placeholderTextColor={colors.textDim}
+                  keyboardType="numeric"
+                  maxLength={3}
                   style={{
                     backgroundColor: colors.cardAlt,
                     borderColor: colors.border,

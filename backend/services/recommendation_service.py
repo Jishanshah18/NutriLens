@@ -86,6 +86,7 @@ def generate_personalized_recommendation(
         conditions=conditions,
         allergies=allergies,
         preferences=preferences,
+        age=profile.age,
         data_completeness=completeness,
         missing_nutrients=missing,
         data_sources=sources
@@ -106,6 +107,7 @@ def _run_clinical_reasoning(
     conditions: List[str],
     allergies: List[str],
     preferences: List[str],
+    age: Optional[int] = None,
     data_completeness: str = "High",
     missing_nutrients: Optional[List[str]] = None,
     data_sources: Optional[List[str]] = None
@@ -298,9 +300,59 @@ def _run_clinical_reasoning(
                 f"Evaluated nutritional makeup for your {cond_clean} profile; maintain standard moderation."
             )
 
+    # 2.5 Evaluate Age-Specific Nutritional Guidance (Evidence-based clinical guidelines)
+    if age is not None:
+        conditions_evaluated.append(f"Age Context ({age} yrs)")
+        if age < 18:
+            # Pediatric guidelines (AHA/AAP/WHO)
+            if sugar is not None and sugar >= 10.0:
+                is_moderately_unsuitable = True
+                key_concerns.append(f"High Sugar for Age <18 ({sugar}g)")
+                reasons.append(
+                    f"Pediatric guidelines (AHA/WHO) recommend limiting added sugars to under 25g daily for children and adolescents. At age {age}, this item accounts for {int((sugar/25.0)*100)}% of the daily recommended sugar ceiling."
+                )
+                better_alternatives.append("Choose whole-fruit or unsweetened snacks to support healthy metabolic development.")
+            has_sweetener = any(sw in text_lower for sw in ["aspartame", "sucralose", "acesulfame", "saccharin"])
+            if has_sweetener:
+                key_concerns.append("Artificial Sweeteners in Youth Diet")
+                reasons.append(
+                    "Contains synthetic high-intensity sweeteners; pediatric clinical advice recommends prioritizing whole natural foods for developing metabolisms."
+                )
+            if protein is not None and protein >= 6.0:
+                positive_notes.append("Growth Protein Support")
+        elif age >= 65:
+            # Older adult / senior guidelines (AHA/ACC/ESPEN)
+            if sodium is not None and sodium >= 300.0:
+                is_moderately_unsuitable = True
+                if not any("Sodium" in kc for kc in key_concerns):
+                    key_concerns.append(f"Sodium Sensitive for Age 65+ ({int(sodium)}mg)")
+                reasons.append(
+                    f"For age {age}, cardiovascular and renal guidelines recommend stricter sodium moderation (<1500mg daily ideal) to support healthy arterial elasticity and fluid balance."
+                )
+            if protein is not None and protein >= 8.0:
+                positive_notes.append(f"Muscle-Preserving Protein ({protein}g)")
+                reasons.append(
+                    f"Adequate dietary protein ({protein}g per serving) supports muscle mass retention and functional vitality for healthy aging."
+                )
+            if sugar is not None and sugar > 15.0:
+                is_moderately_unsuitable = True
+                if not any("Sugar" in kc for kc in key_concerns):
+                    key_concerns.append(f"High Glycemic Load ({sugar}g sugar)")
+                reasons.append(
+                    "High simple sugar intake in older adults can increase glycemic variability; whole grains and fiber-rich choices are preferred."
+                )
+        else:
+            # Young / Middle Adult (18-64)
+            if sodium is not None and sodium < 140.0:
+                positive_notes.append("Low Sodium Profile (<140mg)")
+
     # 3. If user has NO health conditions selected
     if not conditions:
-        conditions_evaluated = ["General Wellness Profile (No Specific Conditions Set)"]
+        general_label = "General Wellness Profile (No Specific Conditions Set)"
+        if age is not None:
+            conditions_evaluated = [general_label, f"Age Context ({age} yrs)"]
+        else:
+            conditions_evaluated = [general_label]
         s_val = sugar if sugar is not None else 0.0
         na_val = sodium if sodium is not None else 0.0
         cal_val = calories if calories is not None else 0.0

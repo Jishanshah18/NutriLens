@@ -18,6 +18,7 @@ import * as ImagePicker from "expo-image-picker";
 import {
   analyzeLabel,
   analyzeLabelImage,
+  analyzeBarcodeImage,
   extractOcrText,
   lookupBarcode,
   getActiveUserId,
@@ -28,6 +29,7 @@ import {
   PersonalizedRecommendation
 } from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
+import { useAuth } from "../lib/AuthContext";
 import { ScanningOverlay } from "../components/ScanningOverlay";
 import { BottomNav } from "../components/BottomNav";
 
@@ -207,17 +209,33 @@ export default function ScannerScreen() {
   const webVideoRef = useRef<any>(null);
   const webStreamRef = useRef<any>(null);
 
+  // Live Auto-Detection States (Enabled by default for hands-free live scanning)
+  const [isLiveAutoDetect, setIsLiveAutoDetect] = useState(true);
+  const [autoDetectProgress, setAutoDetectProgress] = useState(0);
+  const liveScanCooldownRef = useRef(false);
+
   // Selected Image
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
+  const { userProfile: authProfile, userId } = useAuth();
+
   // Active User Profile
-  const [profile, setProfile] = useState<UserProfile>({
-    user_id: "default_user",
-    health_conditions: ["Diabetes"],
-    dietary_preferences: ["Low Sugar"],
-    allergies: [],
-    health_goals: ["Blood Sugar Management"]
-  });
+  const [profile, setProfile] = useState<UserProfile>(
+    authProfile || {
+      user_id: userId || "",
+      age: null,
+      health_conditions: ["Diabetes"],
+      dietary_preferences: ["Low Sugar"],
+      allergies: [],
+      health_goals: ["Blood Sugar Management"]
+    }
+  );
+
+  useEffect(() => {
+    if (authProfile) {
+      setProfile(authProfile);
+    }
+  }, [authProfile]);
 
   // Animated laser line
   const laserAnim = useRef(new Animated.Value(0)).current;
@@ -244,9 +262,9 @@ export default function ScannerScreen() {
     loadActiveProfile();
   }, []);
 
-  // Automatic live barcode scanner for Web browsers with BarcodeDetector support
+  // 1. Live Barcode Continuous Detection Loop (Web & Native)
   useEffect(() => {
-    if (Platform.OS !== "web" || scanMode !== "barcode" || !isCameraActive) return;
+    if (Platform.OS !== "web" || scanMode !== "barcode" || !isCameraActive || !isLiveAutoDetect) return;
 
     let isCancelled = false;
     let intervalId: any = null;
@@ -258,32 +276,113 @@ export default function ScannerScreen() {
         });
 
         intervalId = setInterval(async () => {
-          if (isCancelled || isBarcodeLoading) return;
+          if (isCancelled || isBarcodeLoading || liveScanCooldownRef.current) return;
           const video = webVideoRef.current;
           if (!video || video.readyState < 2) return;
 
           try {
             const barcodes = await detector.detect(video);
-            if (barcodes && barcodes.length > 0 && !isCancelled) {
+            if (barcodes && barcodes.length > 0 && !isCancelled && !liveScanCooldownRef.current) {
               const code = barcodes[0].rawValue;
               if (code && code.length >= 8) {
+                liveScanCooldownRef.current = true;
                 handleBarcodeDetected(code);
+                setTimeout(() => { liveScanCooldownRef.current = false; }, 3500);
               }
             }
           } catch (e) {
             // Frame detection skipped
           }
-        }, 600);
+        }, 350);
       } catch (e) {
-        console.log("BarcodeDetector setup skipped:", e);
+        console.log("BarcodeDetector setup note:", e);
       }
+    } else {
+      // Automatic frame sampler for browsers without window.BarcodeDetector
+      intervalId = setInterval(async () => {
+        if (isCancelled || isBarcodeLoading || liveScanCooldownRef.current) return;
+        const video = webVideoRef.current;
+        if (!video || video.readyState < 2 || !video.videoWidth) return;
+
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = 480;
+          canvas.height = 180;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            const sy = Math.max(0, (video.videoHeight - (video.videoHeight * 0.4)) / 2);
+            const sh = video.videoHeight * 0.4;
+            ctx.drawImage(video, 0, sy, video.videoWidth, sh, 0, 0, 480, 180);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+            const b64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+            if (b64) {
+              liveScanCooldownRef.current = true;
+              const res = await analyzeBarcodeImage(b64, profile).catch(() => null);
+              if (res && res.is_food && !isCancelled) {
+                router.push({
+                  pathname: "/results",
+                  params: { data: JSON.stringify(res) }
+                });
+              } else {
+                setTimeout(() => { liveScanCooldownRef.current = false; }, 1600);
+              }
+            }
+          }
+        } catch (err) {}
+      }, 1600);
     }
 
     return () => {
       isCancelled = true;
       if (intervalId) clearInterval(intervalId);
     };
-  }, [scanMode, isCameraActive, isBarcodeLoading]);
+  }, [scanMode, isCameraActive, isBarcodeLoading, isLiveAutoDetect, profile]);
+
+  // 2. Live Nutrition Label (NutriLens 3:4) Continuous Auto-Detection Loop
+  useEffect(() => {
+    if (scanMode !== "nutrition" || !isCameraActive || !isLiveAutoDetect || scanStage !== "IDLE" || selectedImageUri) {
+      setAutoDetectProgress(0);
+      return;
+    }
+
+    let isCancelled = false;
+    let tickCount = 0;
+    const requiredTicks = 4; // ~2 seconds of steady video frames to auto-detect
+
+    const intervalId = setInterval(() => {
+      if (isCancelled || scanStage !== "IDLE" || liveScanCooldownRef.current) return;
+
+      if (Platform.OS === "web") {
+        const video = webVideoRef.current;
+        if (!video || video.readyState < 2 || !video.videoWidth) {
+          tickCount = 0;
+          setAutoDetectProgress(0);
+          return;
+        }
+      }
+
+      tickCount++;
+      const currentPct = Math.min(100, Math.round((tickCount / requiredTicks) * 100));
+      setAutoDetectProgress(currentPct);
+
+      if (tickCount >= requiredTicks) {
+        liveScanCooldownRef.current = true;
+        setAutoDetectProgress(100);
+        clearInterval(intervalId);
+        captureAndScan();
+        setTimeout(() => {
+          liveScanCooldownRef.current = false;
+          setAutoDetectProgress(0);
+        }, 4000);
+      }
+    }, 500);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(intervalId);
+      setAutoDetectProgress(0);
+    };
+  }, [scanMode, isCameraActive, isLiveAutoDetect, scanStage, selectedImageUri]);
 
   const loadActiveProfile = async () => {
     try {
@@ -405,6 +504,7 @@ export default function ScannerScreen() {
 
   // Gallery Picker
   const pickImageFromGallery = async () => {
+    if (scanStage !== "IDLE" || isBarcodeLoading) return;
     setScanError(null);
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -430,7 +530,11 @@ export default function ScannerScreen() {
         }
 
         if (b64) {
-          runSimulationAndAnalyze(b64);
+          if (scanMode === "barcode") {
+            handleBarcodeImageUpload(b64, asset.uri);
+          } else {
+            runSimulationAndAnalyze(b64);
+          }
         }
       }
     } catch (err: any) {
@@ -441,6 +545,7 @@ export default function ScannerScreen() {
 
   // Capture Photo from Camera & Execute Analysis
   const captureAndScan = async () => {
+    if (scanStage !== "IDLE" || isBarcodeLoading) return;
     setScanError(null);
     let capturedBase64 = "";
 
@@ -580,6 +685,70 @@ export default function ScannerScreen() {
     startCamera();
   };
 
+  // Handle Barcode Photo Picked from Gallery
+  const handleBarcodeImageUpload = async (b64: string, uri: string) => {
+    setSelectedImageUri(uri);
+    setIsBarcodeLoading(true);
+    setScanError(null);
+    setScanStage("ANALYZING");
+    setSimulationStageIndex(2);
+
+    // 1. Try client-side BarcodeDetector first if supported in browser
+    if (Platform.OS === "web" && typeof window !== "undefined" && "BarcodeDetector" in window) {
+      try {
+        const detector = new (window as any).BarcodeDetector({
+          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"]
+        });
+        const img = new (window as any).Image();
+        img.src = uri.startsWith("data:") ? uri : `data:image/jpeg;base64,${b64}`;
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+        const detected = await detector.detect(img);
+        if (detected && detected.length > 0 && detected[0].rawValue) {
+          const code = detected[0].rawValue.trim();
+          if (code.length >= 8) {
+            handleBarcodeDetected(code);
+            return;
+          }
+        }
+      } catch (e) {
+        console.log("Client-side image barcode detection note:", e);
+      }
+    }
+
+    // 2. Full backend decoding pass (zxing-cpp + contrast enhance + 90/180/270 rotations + OCR fallback)
+    try {
+      const response = await analyzeBarcodeImage(b64, profile);
+      if (response.is_food === false && !response.health_score) {
+        setIsBarcodeLoading(false);
+        setScanStage("IDLE");
+        setScanError(
+          response.rejection_reason ||
+          "Could not detect a clear barcode in this photo. Please ensure barcode numbers are clearly visible, or enter manually."
+        );
+        return;
+      }
+
+      setSimulationStageIndex(4);
+      setScanStage("RESULT");
+      setTimeout(() => {
+        setScanStage("IDLE");
+        setIsBarcodeLoading(false);
+        router.push({
+          pathname: "/results",
+          params: { data: JSON.stringify(response) }
+        });
+      }, 400);
+    } catch (err: any) {
+      console.warn("Barcode image analysis error:", err);
+      setIsBarcodeLoading(false);
+      setScanStage("IDLE");
+      setScanError("Failed to analyze barcode image. Please try again or enter the numbers manually.");
+    }
+  };
+
   // Barcode detection & online lookup
   const handleBarcodeDetected = async (barcode: string) => {
     const cleanCode = barcode.trim().replace(/\s+/g, "");
@@ -628,19 +797,38 @@ export default function ScannerScreen() {
     setScanError(null);
     if (Platform.OS === "web") {
       const video = webVideoRef.current;
-      if (video && typeof window !== "undefined" && "BarcodeDetector" in window) {
-        try {
-          const detector = new (window as any).BarcodeDetector({
-            formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"]
-          });
-          const detected = await detector.detect(video);
-          if (detected && detected.length > 0 && detected[0].rawValue) {
-            handleBarcodeDetected(detected[0].rawValue);
-            return;
+      if (video && video.videoWidth) {
+        if (typeof window !== "undefined" && "BarcodeDetector" in window) {
+          try {
+            const detector = new (window as any).BarcodeDetector({
+              formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"]
+            });
+            const detected = await detector.detect(video);
+            if (detected && detected.length > 0 && detected[0].rawValue) {
+              handleBarcodeDetected(detected[0].rawValue);
+              return;
+            }
+          } catch (e) {
+            console.log("Barcode detection error on frame:", e);
           }
-        } catch (e) {
-          console.log("Barcode detection error on frame:", e);
         }
+
+        // Automatic fallback: snapshot canvas frame and decode
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+            const b64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+            if (b64) {
+              handleBarcodeImageUpload(b64, dataUrl);
+              return;
+            }
+          }
+        } catch (e) {}
       }
     }
     // If not detected from camera frame, open manual entry with guidance
@@ -810,6 +998,48 @@ export default function ScannerScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Live Auto-Scan Toggle Indicator */}
+        <TouchableOpacity
+          onPress={() => setIsLiveAutoDetect((prev) => !prev)}
+          activeOpacity={0.8}
+          style={{
+            marginHorizontal: 18,
+            marginBottom: 12,
+            alignSelf: "center",
+            paddingHorizontal: 14,
+            paddingVertical: 6,
+            borderRadius: 14,
+            backgroundColor: isLiveAutoDetect
+              ? (scanMode === "barcode" ? "rgba(6, 182, 212, 0.15)" : "rgba(16, 185, 129, 0.15)")
+              : "rgba(255, 255, 255, 0.08)",
+            borderColor: isLiveAutoDetect
+              ? (scanMode === "barcode" ? "#06B6D4" : "#10B981")
+              : "rgba(255, 255, 255, 0.2)",
+            borderWidth: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8
+          }}
+        >
+          <View style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: isLiveAutoDetect
+              ? (scanMode === "barcode" ? "#06B6D4" : "#10B981")
+              : "#64748B"
+          }} />
+          <Text style={{
+            color: isLiveAutoDetect ? "#F8FAFC" : "#94A3B8",
+            fontSize: 11,
+            fontWeight: "800"
+          }}>
+            {isLiveAutoDetect
+              ? (scanMode === "barcode" ? "🟢 Live Barcode Detection: Active" : "🟢 Live NutriLens Detection: Active")
+              : "⏸️ Live Detection Paused (Tap to Enable)"}
+          </Text>
+        </TouchableOpacity>
 
         {/* Error Alert Card (If Scan or OCR Failed) */}
         {scanError && (
@@ -1041,9 +1271,38 @@ export default function ScannerScreen() {
                 transform: [{ translateY: nutritionLaserY }]
               }} />
 
-              <View style={{ backgroundColor: "rgba(0,0,0,0.65)", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 }}>
+              {/* Live Detection Top Indicator */}
+              <View style={{
+                position: "absolute",
+                top: 10,
+                backgroundColor: isLiveAutoDetect ? "rgba(16, 185, 129, 0.25)" : "rgba(0,0,0,0.65)",
+                borderColor: isLiveAutoDetect ? "#10B981" : "rgba(255,255,255,0.2)",
+                borderWidth: 1,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6
+              }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isLiveAutoDetect ? "#10B981" : "#64748B" }} />
+                <Text style={{ color: isLiveAutoDetect ? "#34D399" : "#94A3B8", fontSize: 10, fontWeight: "800" }}>
+                  {isLiveAutoDetect ? "LIVE AI SCANNER ACTIVE" : "MANUAL CAPTURE"}
+                </Text>
+              </View>
+
+              <View style={{
+                backgroundColor: "rgba(0,0,0,0.72)",
+                borderColor: autoDetectProgress > 0 ? "#10B981" : "transparent",
+                borderWidth: 1,
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 14
+              }}>
                 <Text style={{ color: "#F8FAFC", fontSize: 11, fontWeight: "700" }}>
-                  Align nutrition facts or food package in 3:4 frame
+                  {autoDetectProgress > 0 && autoDetectProgress < 100
+                    ? `🎯 Label Detected (${autoDetectProgress}%)... Hold Steady`
+                    : "Align nutrition facts or food package in 3:4 frame"}
                 </Text>
               </View>
             </View>
@@ -1068,6 +1327,27 @@ export default function ScannerScreen() {
               {/* Left & Right Barcode Guide Brackets */}
               <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 14, borderLeftWidth: 3.5, borderTopWidth: 3.5, borderBottomWidth: 3.5, borderColor: "#06B6D4", borderTopLeftRadius: 10, borderBottomLeftRadius: 10 }} />
               <View style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: 14, borderRightWidth: 3.5, borderTopWidth: 3.5, borderBottomWidth: 3.5, borderColor: "#06B6D4", borderTopRightRadius: 10, borderBottomRightRadius: 10 }} />
+
+              {/* Top Live Detect Tag on Barcode Slot */}
+              <View style={{
+                position: "absolute",
+                top: 4,
+                right: 8,
+                backgroundColor: "rgba(6, 182, 212, 0.25)",
+                borderColor: "#06B6D4",
+                borderWidth: 1,
+                paddingHorizontal: 7,
+                paddingVertical: 2,
+                borderRadius: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4
+              }}>
+                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#06B6D4" }} />
+                <Text style={{ color: "#38BDF8", fontSize: 9, fontWeight: "900" }}>
+                  LIVE DETECT ON
+                </Text>
+              </View>
 
               {/* Animated Barcode Red Laser */}
               <Animated.View style={{
@@ -1155,13 +1435,32 @@ export default function ScannerScreen() {
             marginHorizontal: 18,
             gap: 14
           }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              {/* Gallery Image Upload for Barcode */}
+              <TouchableOpacity
+                onPress={pickImageFromGallery}
+                activeOpacity={0.8}
+                style={{
+                  width: 56,
+                  height: 58,
+                  borderRadius: 20,
+                  backgroundColor: "rgba(255,255,255,0.08)",
+                  borderColor: "rgba(6, 182, 212, 0.4)",
+                  borderWidth: 1.5,
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+                accessibilityLabel="Choose barcode image from gallery"
+              >
+                <Text style={{ fontSize: 22 }}>🖼️</Text>
+              </TouchableOpacity>
+
               {/* Type Barcode Toggle Button */}
               <TouchableOpacity
                 onPress={() => setShowManualBarcode((prev) => !prev)}
                 activeOpacity={0.8}
                 style={{
-                  width: 58,
+                  width: 56,
                   height: 58,
                   borderRadius: 20,
                   backgroundColor: showManualBarcode ? "rgba(6, 182, 212, 0.2)" : "rgba(255,255,255,0.08)",
@@ -1170,8 +1469,9 @@ export default function ScannerScreen() {
                   alignItems: "center",
                   justifyContent: "center"
                 }}
+                accessibilityLabel="Enter barcode manually"
               >
-                <Text style={{ fontSize: 24 }}>⌨️</Text>
+                <Text style={{ fontSize: 22 }}>⌨️</Text>
               </TouchableOpacity>
 
               {/* Big [ Scan Barcode ] Button */}

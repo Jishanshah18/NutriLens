@@ -27,7 +27,7 @@ const HEALTHY_SUGGESTIONS = [
 export default function HomeScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
-  const { userProfile: authProfile, isAuthenticated } = useAuth();
+  const { userProfile: authProfile, userId, isAuthenticated } = useAuth();
 
   const [profile, setProfile] = useState<UserProfile | null>(authProfile);
   const [stats, setStats] = useState<UserStatsResponse | null>(null);
@@ -41,17 +41,28 @@ export default function HomeScreen() {
   }, [authProfile]);
 
   useEffect(() => {
-    loadHomeData();
-  }, []);
+    if (userId) {
+      loadHomeData(userId);
+    } else {
+      setRecentScans([]);
+      setProfile(null);
+      setStats(null);
+    }
+  }, [userId]);
 
-  const loadHomeData = async () => {
+  const loadHomeData = async (targetUid?: string) => {
+    const activeId = targetUid || userId || getActiveUserId();
+    if (!activeId) {
+      setRecentScans([]);
+      setIsRefreshing(false);
+      return;
+    }
     try {
-      const activeId = await getActiveUserId();
-      const saved = await getSavedUserProfile();
+      const saved = getSavedUserProfile(activeId);
       const [prof, st, hist] = await Promise.all([
         getUserProfile(activeId).catch(() => null),
         getUserStats(activeId).catch(() => null),
-        getScanHistory(activeId, 6).catch(() => [])
+        getScanHistory(activeId, 8).catch(() => [])
       ]);
       const currentProfile = authProfile || saved || prof;
       if (currentProfile) setProfile(currentProfile);
@@ -104,7 +115,7 @@ export default function HomeScreen() {
               {getGreeting()},
             </Text>
             <Text style={{ fontSize: 24, fontWeight: "900", color: colors.text, letterSpacing: -0.5, marginTop: 2 }}>
-              {profile?.full_name || "Jishan Ahmed"} 👋
+              {profile?.full_name || authProfile?.full_name || "Health Seeker"} 👋
             </Text>
 
             {/* Active Conditions Pill Strip */}
@@ -169,37 +180,61 @@ export default function HomeScreen() {
             </TouchableOpacity>
 
             <View style={{ flexDirection: "row", gap: 6 }}>
-              <TouchableOpacity
-                onPress={() => router.push("/login")}
-                style={{
-                  backgroundColor: colors.cardAlt,
-                  borderColor: colors.border,
-                  borderWidth: 1,
-                  borderRadius: 12,
-                  paddingHorizontal: 9,
-                  paddingVertical: 4
-                }}
-              >
-                <Text style={{ fontSize: 11, fontWeight: "700", color: colors.emerald }}>
-                  {isAuthenticated ? "Switch" : "Log In"}
-                </Text>
-              </TouchableOpacity>
+              {isAuthenticated ? (
+                <TouchableOpacity
+                  onPress={() => router.push("/profile")}
+                  style={{
+                    backgroundColor: `${colors.emerald}15`,
+                    borderColor: `${colors.emerald}50`,
+                    borderWidth: 1,
+                    borderRadius: 12,
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4
+                  }}
+                >
+                  <Text style={{ fontSize: 12 }}>👤</Text>
+                  <Text style={{ fontSize: 11, fontWeight: "800", color: colors.emerald }}>
+                    Profile
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    onPress={() => router.push("/login")}
+                    style={{
+                      backgroundColor: colors.cardAlt,
+                      borderColor: colors.border,
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      paddingHorizontal: 9,
+                      paddingVertical: 4
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: "700", color: colors.emerald }}>
+                      Log In
+                    </Text>
+                  </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={() => router.push("/signup")}
-                style={{
-                  backgroundColor: `${colors.emerald}18`,
-                  borderColor: `${colors.emerald}50`,
-                  borderWidth: 1,
-                  borderRadius: 12,
-                  paddingHorizontal: 9,
-                  paddingVertical: 4
-                }}
-              >
-                <Text style={{ fontSize: 11, fontWeight: "800", color: colors.emerald }}>
-                  Sign Up
-                </Text>
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => router.push("/signup")}
+                    style={{
+                      backgroundColor: `${colors.emerald}18`,
+                      borderColor: `${colors.emerald}50`,
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      paddingHorizontal: 9,
+                      paddingVertical: 4
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: colors.emerald }}>
+                      Sign Up
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </View>
         </View>
@@ -395,12 +430,20 @@ export default function HomeScreen() {
             ) : (
               <View style={{
                 backgroundColor: colors.card,
-                padding: 20,
-                borderRadius: 18,
+                padding: 24,
+                borderRadius: 20,
                 borderWidth: 1,
-                borderColor: colors.border
+                borderColor: colors.border,
+                width: 280,
+                alignItems: "center"
               }}>
-                <Text style={{ color: colors.textMuted, fontSize: 13 }}>No scans yet. Tap scan below to start!</Text>
+                <Text style={{ fontSize: 28, marginBottom: 6 }}>🥑</Text>
+                <Text style={{ color: colors.text, fontSize: 14, fontWeight: "800", textAlign: "center" }}>
+                  No food scans yet
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4, textAlign: "center", lineHeight: 16 }}>
+                  Scan a food label to see your history here.
+                </Text>
               </View>
             )}
           </ScrollView>

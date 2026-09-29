@@ -56,10 +56,21 @@ def update_user_profile(profile: UserProfile) -> UserProfile:
                 "allergies": profile.allergies,
                 "health_goals": profile.health_goals
             }
+            if profile.age is not None:
+                clean_supa["age"] = profile.age
             try:
                 supabase.table("user_profiles").upsert({**clean_supa, "health_conditions": profile.health_conditions}).execute()
             except Exception:
-                supabase.table("user_profiles").upsert(clean_supa).execute()
+                # If health_conditions or age column isn't in user_profiles schema yet, fall back to core columns
+                try:
+                    supabase.table("user_profiles").upsert({
+                        "user_id": profile.user_id,
+                        "dietary_preferences": profile.dietary_preferences,
+                        "allergies": profile.allergies,
+                        "health_goals": profile.health_goals
+                    }).execute()
+                except Exception as inner_e:
+                    print(f"Supabase upsert fallback notice: {inner_e}")
         except Exception as e:
             print(f"Notice: Supabase cloud sync: {e}")
 
@@ -71,6 +82,7 @@ def register_new_user(req: UserRegisterRequest) -> UserAuthResponse:
         email=req.email,
         password=req.password,
         full_name=req.full_name,
+        age=req.age,
         health_conditions=req.health_conditions,
         dietary_preferences=req.dietary_preferences,
         allergies=req.allergies,
@@ -130,3 +142,7 @@ def get_user_stats(user_id: str = "default_user") -> UserStatsResponse:
         level=stats_data.get("level", 3),
         badges=badges
     )
+
+
+def update_user_password(user_id: str, new_password: str) -> bool:
+    return db_store.update_password(user_id, new_password)

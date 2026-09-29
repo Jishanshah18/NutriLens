@@ -37,9 +37,11 @@ async def analyze_label_endpoint(request: AnalyzeRequest):
     """
     try:
         response = analyze_ingredients(request.ocr_text, request.user_profile)
-        # Automatically save to scan history
-        user_id = request.user_profile.user_id if request.user_profile else "default_user"
-        save_scan_history(response, request.ocr_text, user_id=user_id)
+        # Only save valid food scans to history for authenticated users
+        if response.is_food:
+            user_id = request.user_profile.user_id if request.user_profile and request.user_profile.user_id else None
+            if user_id and user_id not in ["guest", ""]:
+                save_scan_history(response, request.ocr_text, user_id=user_id)
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to analyze label: {str(e)}")
@@ -52,9 +54,12 @@ async def analyze_image_endpoint(request: AnalyzeImageRequest):
     """
     try:
         response = analyze_label_image(request.image_base64, request.user_profile)
-        user_id = request.user_profile.user_id if request.user_profile else "default_user"
-        saved_text = response.ocr_text if response.ocr_text else "Image Scan"
-        save_scan_history(response, saved_text, user_id=user_id)
+        # Only save valid food scans to history for authenticated users
+        if response.is_food:
+            user_id = request.user_profile.user_id if request.user_profile and request.user_profile.user_id else None
+            if user_id and user_id not in ["guest", ""]:
+                saved_text = response.ocr_text if response.ocr_text else "Image Scan"
+                save_scan_history(response, saved_text, user_id=user_id)
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to analyze image: {str(e)}")
@@ -70,7 +75,7 @@ async def analyze_barcode_endpoint(barcode: str, user_id: str = "default_user"):
         from services.user_service import get_user_profile
         profile = get_user_profile(user_id)
         response = analyze_ingredients(f"Scanned Barcode GTIN: {barcode}", profile)
-        if response.is_food:
+        if response.is_food and user_id and user_id not in ["guest", ""]:
             save_scan_history(response, f"Barcode GTIN: {barcode}", user_id=user_id)
         return response
     except Exception as e:
@@ -102,7 +107,7 @@ async def analyze_barcode_image_endpoint(request: AnalyzeImageRequest):
             )
 
         response = analyze_ingredients(f"Scanned Barcode GTIN: {barcode}", profile)
-        if response.is_food:
+        if response.is_food and user_id and user_id not in ["guest", ""]:
             save_scan_history(response, f"Barcode GTIN: {barcode}", user_id=user_id)
         return response
     except Exception as e:

@@ -1,18 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, TouchableOpacity, ScrollView, Switch, ActivityIndicator, TextInput, Modal, Alert } from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, Switch, ActivityIndicator, TextInput, Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import {
   getUserProfile,
-  updateUserProfile,
   getUserStats,
-  getActiveUserId,
-  setActiveUserId,
-  getUserList,
-  loginUser,
-  registerUser,
   UserProfile,
-  UserStatsResponse,
-  UserAccountInfo
+  UserStatsResponse
 } from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
 import { useAuth } from "../lib/AuthContext";
@@ -43,18 +36,25 @@ const ALL_GOALS = ["Weight Loss", "Muscle Gain", "Heart Health", "Diabetic Care"
 export default function ProfileScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useTheme();
-  const { userProfile: authProfile, userId: authUserId, logout, isAuthenticated } = useAuth();
+  const {
+    userProfile: authProfile,
+    userId,
+    logout,
+    updateProfile,
+    updatePassword,
+    isAuthenticated
+  } = useAuth();
 
-  const [activeId, setActiveId] = useState<string>(authUserId || "default_user");
   const [profile, setProfile] = useState<UserProfile>(
     authProfile || {
-      user_id: "default_user",
-      email: "jishan@nutrilens.ai",
-      full_name: "Jishan Ahmed",
-      health_conditions: ["Diabetes", "High Blood Pressure"],
-      dietary_preferences: ["Low Sugar", "Diabetic-Friendly"],
-      allergies: ["Peanuts", "Lactose Intolerant"],
-      health_goals: ["Weight Loss", "Heart Health"]
+      user_id: userId || "",
+      email: "",
+      full_name: "",
+      age: null,
+      health_conditions: [],
+      dietary_preferences: [],
+      allergies: [],
+      health_goals: []
     }
   );
 
@@ -62,123 +62,131 @@ export default function ProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Account switching / Auth Modal state
-  const [userList, setUserList] = useState<UserAccountInfo[]>([]);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState<"switch" | "login" | "register">("switch");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authFullName, setAuthFullName] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  // Age state
+  const [ageInput, setAgeInput] = useState<string>(
+    authProfile?.age !== undefined && authProfile?.age !== null ? String(authProfile.age) : ""
+  );
+  const [ageSaving, setAgeSaving] = useState(false);
+  const [ageSuccess, setAgeSuccess] = useState(false);
+  const [ageError, setAgeError] = useState<string | null>(null);
+
+  // Password Change state
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [showPasswordSection, setShowPasswordSection] = useState(false);
 
   // Custom condition state
   const [showAddCustom, setShowAddCustom] = useState(false);
   const [customConditionInput, setCustomConditionInput] = useState("");
 
+  // Custom preference state
+  const [showAddPref, setShowAddPref] = useState(false);
+  const [customPrefInput, setCustomPrefInput] = useState("");
+
+  // Custom allergy state
+  const [showAddAllergy, setShowAddAllergy] = useState(false);
+  const [customAllergyInput, setCustomAllergyInput] = useState("");
+
+  // Custom goal state
+  const [showAddGoal, setShowAddGoal] = useState(false);
+  const [customGoalInput, setCustomGoalInput] = useState("");
+
   useEffect(() => {
     if (authProfile) {
       setProfile(authProfile);
-      setActiveId(authProfile.user_id || "default_user");
+      if (authProfile.age !== undefined && authProfile.age !== null) {
+        setAgeInput(String(authProfile.age));
+      }
     }
   }, [authProfile]);
 
   useEffect(() => {
-    const currentUid = getActiveUserId();
-    setActiveId(currentUid);
-    loadProfileAndStats(currentUid);
-    getUserList().then(setUserList).catch(() => {});
-  }, []);
-
-  const loadProfileAndStats = async (uid: string) => {
-    try {
-      const [prof, st] = await Promise.all([
-        getUserProfile(uid),
-        getUserStats(uid)
-      ]);
-      if (prof) setProfile(prof);
-      if (st) setStats(st);
-    } catch (e) {
-      console.warn("Notice loading user profile:", e);
+    if (userId) {
+      getUserStats(userId).then(setStats).catch(() => {});
     }
-  };
+  }, [userId]);
 
   const handleLogout = async () => {
     try {
       await logout();
-      setActiveId("default_user");
-      await loadProfileAndStats("default_user");
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2000);
+      router.replace("/login");
     } catch (e) {
       console.warn("Error logging out:", e);
     }
   };
 
-  const switchAccount = async (targetUid: string) => {
-    setActiveId(targetUid);
-    setActiveUserId(targetUid);
-    setShowAuthModal(false);
-    await loadProfileAndStats(targetUid);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2000);
-  };
-
-  const handleLoginSubmit = async () => {
-    if (!authEmail.trim() || !authPassword.trim()) {
-      setAuthError("Please enter both email and password.");
-      return;
-    }
-    setAuthLoading(true);
-    setAuthError(null);
+  const persistProfile = async (updatedProfile: UserProfile) => {
+    setIsSaving(true);
     try {
-      const res = await loginUser(authEmail, authPassword);
-      setActiveId(res.user_id);
-      setProfile(res.profile);
-      setShowAuthModal(false);
-      setAuthEmail("");
-      setAuthPassword("");
-      await loadProfileAndStats(res.user_id);
-      getUserList().then(setUserList).catch(() => {});
-    } catch (err: any) {
-      setAuthError(err.message || "Failed to log in.");
+      await updateProfile(updatedProfile);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2200);
+    } catch (e) {
+      console.warn("Notice saving profile:", e);
     } finally {
-      setAuthLoading(false);
+      setIsSaving(false);
     }
   };
 
-  const handleRegisterSubmit = async () => {
-    if (!authEmail.trim() || !authPassword.trim() || !authFullName.trim()) {
-      setAuthError("Please fill out all registration fields.");
+  const handleSaveAge = async () => {
+    setAgeError(null);
+    const parsed = ageInput.trim() ? parseInt(ageInput.trim(), 10) : null;
+    if (parsed !== null && (isNaN(parsed) || parsed < 1 || parsed > 120)) {
+      setAgeError("Please enter a valid age between 1 and 120.");
       return;
     }
-    setAuthLoading(true);
-    setAuthError(null);
+
+    setAgeSaving(true);
     try {
-      const res = await registerUser(authEmail, authPassword, authFullName, ["Diabetes"]);
-      setActiveId(res.user_id);
-      setProfile(res.profile);
-      setShowAuthModal(false);
-      setAuthEmail("");
-      setAuthPassword("");
-      setAuthFullName("");
-      await loadProfileAndStats(res.user_id);
-      getUserList().then(setUserList).catch(() => {});
+      const updated = { ...profile, age: parsed };
+      setProfile(updated);
+      await updateProfile(updated);
+      setAgeSuccess(true);
+      setTimeout(() => setAgeSuccess(false), 2200);
     } catch (err: any) {
-      setAuthError(err.message || "Failed to create account.");
+      setAgeError(err.message || "Failed to update age.");
     } finally {
-      setAuthLoading(false);
+      setAgeSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError(null);
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordError("New password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("Passwords do not match.");
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      await updatePassword(newPassword);
+      setPasswordSuccess(true);
+      setNewPassword("");
+      setConfirmPassword("");
+      setTimeout(() => setPasswordSuccess(false), 3000);
+    } catch (err: any) {
+      setPasswordError(err.message || "Failed to update password.");
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
   // Toggle Health Condition
-  const toggleHealthCondition = async (conditionName: string) => {
+  const toggleCondition = async (condId: string) => {
     const current = profile.health_conditions || [];
-    const updated = current.includes(conditionName)
-      ? current.filter((c) => c !== conditionName)
-      : [...current, conditionName];
+    const isAlreadySelected = current.includes(condId);
+    const updatedConditions = isAlreadySelected
+      ? current.filter((c) => c !== condId)
+      : [...current, condId];
 
-    const updatedProfile = { ...profile, health_conditions: updated };
+    const updatedProfile = { ...profile, health_conditions: updatedConditions };
     setProfile(updatedProfile);
     await persistProfile(updatedProfile);
   };
@@ -191,16 +199,74 @@ export default function ProfileScreen() {
     if (!current.includes(trimmed)) {
       const updatedProfile = { ...profile, health_conditions: [...current, trimmed] };
       setProfile(updatedProfile);
+      setCustomConditionInput("");
+      setShowAddCustom(false);
       await persistProfile(updatedProfile);
+    } else {
+      setCustomConditionInput("");
+      setShowAddCustom(false);
     }
-    setCustomConditionInput("");
-    setShowAddCustom(false);
   };
 
-  // Remove Condition
-  const removeCondition = async (condName: string) => {
-    const current = profile.health_conditions || [];
-    const updatedProfile = { ...profile, health_conditions: current.filter((c) => c !== condName) };
+  // Add Custom Preference
+  const addCustomPreference = async () => {
+    const trimmed = customPrefInput.trim();
+    if (!trimmed) return;
+    const current = profile.dietary_preferences || [];
+    if (!current.includes(trimmed)) {
+      const updatedProfile = { ...profile, dietary_preferences: [...current, trimmed] };
+      setProfile(updatedProfile);
+      setCustomPrefInput("");
+      setShowAddPref(false);
+      await persistProfile(updatedProfile);
+    } else {
+      setCustomPrefInput("");
+      setShowAddPref(false);
+    }
+  };
+
+  // Add Custom Allergy
+  const addCustomAllergy = async () => {
+    const trimmed = customAllergyInput.trim();
+    if (!trimmed) return;
+    const current = profile.allergies || [];
+    if (!current.includes(trimmed)) {
+      const updatedProfile = { ...profile, allergies: [...current, trimmed] };
+      setProfile(updatedProfile);
+      setCustomAllergyInput("");
+      setShowAddAllergy(false);
+      await persistProfile(updatedProfile);
+    } else {
+      setCustomAllergyInput("");
+      setShowAddAllergy(false);
+    }
+  };
+
+  // Add Custom Goal
+  const addCustomGoal = async () => {
+    const trimmed = customGoalInput.trim();
+    if (!trimmed) return;
+    const current = profile.health_goals || [];
+    if (!current.includes(trimmed)) {
+      const updatedProfile = { ...profile, health_goals: [...current, trimmed] };
+      setProfile(updatedProfile);
+      setCustomGoalInput("");
+      setShowAddGoal(false);
+      await persistProfile(updatedProfile);
+    } else {
+      setCustomGoalInput("");
+      setShowAddGoal(false);
+    }
+  };
+
+  // Remove custom item from any profile category
+  const removeCustomItem = async (
+    category: "health_conditions" | "dietary_preferences" | "allergies" | "health_goals",
+    item: string
+  ) => {
+    const current = profile[category] || [];
+    const updated = current.filter((i) => i !== item);
+    const updatedProfile = { ...profile, [category]: updated };
     setProfile(updatedProfile);
     await persistProfile(updatedProfile);
   };
@@ -217,20 +283,13 @@ export default function ProfileScreen() {
     await persistProfile(updatedProfile);
   };
 
-  const persistProfile = async (updatedProfile: UserProfile) => {
-    setIsSaving(true);
-    try {
-      await updateUserProfile(updatedProfile);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2200);
-    } catch (e) {
-      console.warn("Notice saving profile:", e);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const selectedConditions = profile.health_conditions || [];
+  const coreIds = CORE_CONDITIONS.map((c) => c.id);
+  const customConditions = selectedConditions.filter((c) => !coreIds.includes(c));
+
+  const allPrefs = Array.from(new Set([...ALL_PREFERENCES, ...(profile.dietary_preferences || [])]));
+  const allAllergies = Array.from(new Set([...ALL_ALLERGIES, ...(profile.allergies || [])]));
+  const allGoals = Array.from(new Set([...ALL_GOALS, ...(profile.health_goals || [])]));
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -246,7 +305,7 @@ export default function ProfileScreen() {
         borderBottomColor: colors.border
       }}>
         <Text style={{ fontSize: 22, fontWeight: "900", color: colors.text }}>
-          User Account & Health Profile
+          User Account & Profile
         </Text>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -275,7 +334,7 @@ export default function ProfileScreen() {
           elevation: 3
         }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 14, flex: 1 }}>
               <View style={{
                 width: 60,
                 height: 60,
@@ -288,85 +347,32 @@ export default function ProfileScreen() {
               }}>
                 <Text style={{ fontSize: 30 }}>🥑</Text>
               </View>
-              <View>
-                <Text style={{ fontSize: 19, fontWeight: "900", color: colors.text }}>
-                  {profile.full_name || "Active Member"}
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 19, fontWeight: "900", color: colors.text }} numberOfLines={1}>
+                  {profile.full_name || "NutriLens Member"}
                 </Text>
-                <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-                  {profile.email || `${profile.user_id}@nutrilens.ai`}
+                <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }} numberOfLines={1}>
+                  {profile.email || "Authenticated Account"}
                 </Text>
-                <View style={{
-                  backgroundColor: `${colors.emerald}15`,
-                  paddingHorizontal: 8,
-                  paddingVertical: 2,
-                  borderRadius: 6,
-                  alignSelf: "flex-start",
-                  marginTop: 4
-                }}>
-                  <Text style={{ fontSize: 10, fontWeight: "800", color: colors.emerald }}>
-                    ID: {profile.user_id}
-                  </Text>
-                </View>
+                {userId ? (
+                  <View style={{
+                    backgroundColor: `${colors.emerald}15`,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 6,
+                    alignSelf: "flex-start",
+                    marginTop: 4
+                  }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: colors.emerald }} numberOfLines={1}>
+                      UID: {userId.substring(0, 16)}...
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             </View>
 
-            <TouchableOpacity
-              onPress={() => {
-                setAuthMode("switch");
-                setShowAuthModal(true);
-              }}
-              style={{
-                backgroundColor: colors.cardAlt,
-                borderColor: colors.border,
-                borderWidth: 1,
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                borderRadius: 14
-              }}
-            >
-              <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "800" }}>
-                Switch User 👤
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Account Quick Action Buttons (Log In, Sign Up, Log Out) */}
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
-            <TouchableOpacity
-              onPress={() => router.push("/login")}
-              style={{
-                flex: 1,
-                backgroundColor: colors.cardAlt,
-                borderColor: colors.border,
-                borderWidth: 1,
-                paddingVertical: 10,
-                borderRadius: 14,
-                alignItems: "center"
-              }}
-            >
-              <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "800" }}>
-                🔑 Sign In
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => router.push("/signup")}
-              style={{
-                flex: 1,
-                backgroundColor: `${colors.emerald}18`,
-                borderColor: `${colors.emerald}50`,
-                borderWidth: 1,
-                paddingVertical: 10,
-                borderRadius: 14,
-                alignItems: "center"
-              }}
-            >
-              <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "800" }}>
-                ✨ Create Account
-              </Text>
-            </TouchableOpacity>
-
-            {isAuthenticated && (
+            {/* Logout Button */}
+            {isAuthenticated ? (
               <TouchableOpacity
                 onPress={handleLogout}
                 style={{
@@ -374,40 +380,235 @@ export default function ProfileScreen() {
                   borderColor: `${colors.crimson}50`,
                   borderWidth: 1,
                   paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  borderRadius: 14,
-                  alignItems: "center"
+                  paddingVertical: 8,
+                  borderRadius: 14
                 }}
               >
                 <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "800" }}>
-                  Log Out
+                  Log Out 🚪
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={() => router.push("/login")}
+                style={{
+                  backgroundColor: colors.emerald,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 14
+                }}
+              >
+                <Text style={{ color: "#FFF", fontSize: 12, fontWeight: "800" }}>
+                  Sign In
                 </Text>
               </TouchableOpacity>
             )}
           </View>
+        </View>
 
-          {/* Quick Active Conditions Summary Bar */}
-          <View style={{
-            marginTop: 18,
-            paddingTop: 14,
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between"
-          }}>
+        {/* SECTION: AGE & PERSONALIZATION */}
+        <View style={{
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          borderWidth: 1.5,
+          borderRadius: 24,
+          padding: 20,
+          gap: 14
+        }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
             <View>
-              <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, textTransform: "uppercase" }}>
-                Active Disease Profile
+              <Text style={{ fontSize: 17, fontWeight: "900", color: colors.text }}>
+                User Age & Nutritional Context
               </Text>
-              <Text style={{ fontSize: 13, fontWeight: "800", color: selectedConditions.length > 0 ? colors.emerald : colors.textMuted, marginTop: 2 }}>
-                {selectedConditions.length > 0 ? selectedConditions.join(" • ") : "No Conditions Selected (General Wellness)"}
+              <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                Enables pediatric, adult, or senior clinical nutrition guidance
               </Text>
             </View>
+            {ageSuccess && (
+              <View style={{ backgroundColor: `${colors.emerald}20`, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: "800", color: colors.emerald }}>✓ Updated</Text>
+              </View>
+            )}
+          </View>
+
+          {ageError && (
+            <View style={{ backgroundColor: `${colors.crimson}18`, padding: 10, borderRadius: 12 }}>
+              <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "700" }}>{ageError}</Text>
+            </View>
+          )}
+
+          <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+            <TextInput
+              value={ageInput}
+              onChangeText={(val) => {
+                setAgeInput(val.replace(/[^0-9]/g, ""));
+                setAgeError(null);
+              }}
+              placeholder="e.g. 28"
+              placeholderTextColor={colors.textDim}
+              keyboardType="numeric"
+              maxLength={3}
+              style={{
+                flex: 1,
+                backgroundColor: colors.cardAlt,
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 14,
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                color: colors.text,
+                fontSize: 16,
+                fontWeight: "700"
+              }}
+            />
+            <TouchableOpacity
+              onPress={handleSaveAge}
+              disabled={ageSaving}
+              style={{
+                backgroundColor: colors.emerald,
+                paddingHorizontal: 20,
+                paddingVertical: 14,
+                borderRadius: 14,
+                alignItems: "center",
+                justifyContent: "center"
+              }}
+            >
+              {ageSaving ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 13 }}>Save Age</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <View style={{
+            backgroundColor: `${colors.emerald}10`,
+            borderRadius: 14,
+            padding: 12,
+            borderLeftWidth: 3,
+            borderLeftColor: colors.emerald
+          }}>
+            <Text style={{ fontSize: 11, color: colors.text, lineHeight: 16 }}>
+              {profile.age !== null && profile.age !== undefined
+                ? profile.age < 18
+                  ? `👶 Pediatric Mode (${profile.age} yrs): Stricter 25g added sugar limits and artificial sweetener warnings active.`
+                  : profile.age >= 65
+                  ? `👴 Senior Nutrition Mode (${profile.age} yrs): Stricter sodium sensitivity (<1500mg daily) and muscle-preserving protein context active.`
+                  : `🧑 Adult Nutrition Mode (${profile.age} yrs): Standard RDA macro targets and vascular protection context active.`
+                : "Enter your age to personalize sugar, sodium, and macro evaluations to your life stage."}
+            </Text>
           </View>
         </View>
 
-        {/* SECTION 2: MY HEALTH CONDITIONS (PROMINENT CORE FEATURE) */}
+        {/* SECTION: PASSWORD & SECURITY */}
+        {isAuthenticated && (
+          <View style={{
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 24,
+            padding: 20,
+            gap: 14
+          }}>
+            <TouchableOpacity
+              onPress={() => setShowPasswordSection((p) => !p)}
+              style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+            >
+              <View>
+                <Text style={{ fontSize: 16, fontWeight: "800", color: colors.text }}>
+                  Account Security & Password
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                  Update your account authentication credentials
+                </Text>
+              </View>
+              <Text style={{ fontSize: 16, color: colors.emerald, fontWeight: "800" }}>
+                {showPasswordSection ? "▲" : "▼"}
+              </Text>
+            </TouchableOpacity>
+
+            {showPasswordSection && (
+              <View style={{ gap: 12, marginTop: 4 }}>
+                {passwordError && (
+                  <View style={{ backgroundColor: `${colors.crimson}18`, padding: 10, borderRadius: 12 }}>
+                    <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "700" }}>{passwordError}</Text>
+                  </View>
+                )}
+
+                {passwordSuccess && (
+                  <View style={{ backgroundColor: `${colors.emerald}18`, padding: 10, borderRadius: 12 }}>
+                    <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "700" }}>
+                      ✓ Password changed successfully!
+                    </Text>
+                  </View>
+                )}
+
+                <TextInput
+                  value={newPassword}
+                  onChangeText={(val) => {
+                    setNewPassword(val);
+                    setPasswordError(null);
+                  }}
+                  placeholder="New Password (min 6 chars)"
+                  placeholderTextColor={colors.textDim}
+                  secureTextEntry
+                  style={{
+                    backgroundColor: colors.cardAlt,
+                    borderColor: colors.border,
+                    borderWidth: 1,
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    color: colors.text,
+                    fontSize: 14
+                  }}
+                />
+
+                <TextInput
+                  value={confirmPassword}
+                  onChangeText={(val) => {
+                    setConfirmPassword(val);
+                    setPasswordError(null);
+                  }}
+                  placeholder="Confirm New Password"
+                  placeholderTextColor={colors.textDim}
+                  secureTextEntry
+                  style={{
+                    backgroundColor: colors.cardAlt,
+                    borderColor: colors.border,
+                    borderWidth: 1,
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    color: colors.text,
+                    fontSize: 14
+                  }}
+                />
+
+                <TouchableOpacity
+                  onPress={handleChangePassword}
+                  disabled={passwordLoading}
+                  style={{
+                    backgroundColor: colors.emerald,
+                    paddingVertical: 12,
+                    borderRadius: 14,
+                    alignItems: "center"
+                  }}
+                >
+                  {passwordLoading ? (
+                    <ActivityIndicator color="#FFF" size="small" />
+                  ) : (
+                    <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 13 }}>
+                      Update Password
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* SECTION: HEALTH CONDITIONS */}
         <View style={{
           backgroundColor: colors.card,
           borderColor: colors.border,
@@ -418,164 +619,101 @@ export default function ProfileScreen() {
           shadowColor: colors.emerald,
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.08,
-          shadowRadius: 10
+          shadowRadius: 10,
+          elevation: 2
         }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Text style={{ fontSize: 20 }}>🩺</Text>
-                <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>
-                  My Health Conditions
-                </Text>
-              </View>
-              <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, lineHeight: 16 }}>
-                Select your conditions. The AI scanner analyzes ingredients and nutrition specifically for these conditions.
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>
+                Health Conditions & Medical Context
+              </Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                NutriLens analyzes food items specifically against your profile
               </Text>
             </View>
 
-            <TouchableOpacity
-              onPress={() => setShowAddCustom((prev) => !prev)}
-              style={{
-                backgroundColor: `${colors.emerald}18`,
-                borderColor: colors.emerald,
-                borderWidth: 1,
-                paddingHorizontal: 12,
-                paddingVertical: 6,
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => setShowAddCustom((p) => !p)}
+                style={{
+                  backgroundColor: showAddCustom ? `${colors.emerald}30` : `${colors.emerald}18`,
+                  borderColor: colors.emerald,
+                  borderWidth: 1,
+                  paddingHorizontal: 12,
+                  paddingVertical: 5,
+                  borderRadius: 14
+                }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: "800", color: colors.emerald }}>
+                  {showAddCustom ? "✕ Cancel" : "+ Add"}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={{
+                backgroundColor: `${colors.emerald}20`,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
                 borderRadius: 14
-              }}
-            >
-              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.emerald }}>
-                + Add Condition
-              </Text>
-            </TouchableOpacity>
+              }}>
+                <Text style={{ fontSize: 12, fontWeight: "900", color: colors.emerald }}>
+                  {selectedConditions.length} Active
+                </Text>
+              </View>
+            </View>
           </View>
 
-          {/* Add Custom Condition Input Drawer */}
+          {/* Inline Add Custom Condition */}
           {showAddCustom && (
-            <View style={{
-              backgroundColor: colors.cardAlt,
-              borderColor: colors.emerald,
-              borderWidth: 1,
-              borderRadius: 18,
-              padding: 14,
-              gap: 10
-            }}>
-              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.text }}>
-                Enter Condition or Dietary Diagnosis:
-              </Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <TextInput
-                  value={customConditionInput}
-                  onChangeText={setCustomConditionInput}
-                  placeholder="e.g. Celiac disease, Gout, GERD..."
-                  placeholderTextColor={colors.textMuted}
-                  style={{
-                    flex: 1,
-                    backgroundColor: colors.bg,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 12,
-                    paddingHorizontal: 12,
-                    paddingVertical: 8,
-                    color: colors.text,
-                    fontSize: 13
-                  }}
-                />
-                <TouchableOpacity
-                  onPress={addCustomCondition}
-                  style={{
-                    backgroundColor: colors.emerald,
-                    paddingHorizontal: 16,
-                    borderRadius: 12,
-                    justifyContent: "center"
-                  }}
-                >
-                  <Text style={{ color: "#FFF", fontWeight: "800", fontSize: 13 }}>Add</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Quick suggestions */}
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-                {EXTENDED_CONDITIONS.map((ext) => (
-                  <TouchableOpacity
-                    key={ext}
-                    onPress={() => {
-                      setCustomConditionInput(ext);
-                    }}
-                    style={{
-                      backgroundColor: colors.bg,
-                      borderColor: colors.border,
-                      borderWidth: 1,
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 10
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, color: colors.textMuted }}>+ {ext}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+            <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+              <TextInput
+                value={customConditionInput}
+                onChangeText={setCustomConditionInput}
+                placeholder="e.g. Thyroid, PCOS, Gout, Acid Reflux..."
+                placeholderTextColor={colors.textDim}
+                onSubmitEditing={addCustomCondition}
+                style={{
+                  flex: 1,
+                  backgroundColor: colors.cardAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  color: colors.text,
+                  fontSize: 13,
+                  fontWeight: "600"
+                }}
+              />
+              <TouchableOpacity
+                onPress={addCustomCondition}
+                style={{
+                  backgroundColor: colors.emerald,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 12 }}>+ Add</Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {/* Selected Conditions Visual Status Box */}
-          <View style={{
-            backgroundColor: colors.cardAlt,
-            borderColor: colors.border,
-            borderWidth: 1,
-            borderRadius: 18,
-            padding: 14
-          }}>
-            <Text style={{ fontSize: 12, fontWeight: "800", color: colors.textMuted, textTransform: "uppercase", marginBottom: 8 }}>
-              Current Profile Status
-            </Text>
-            {selectedConditions.length === 0 ? (
-              <Text style={{ fontSize: 13, color: colors.textMuted, fontStyle: "italic" }}>
-                No health conditions currently active. Scans will evaluate for general nutritional wellness.
-              </Text>
-            ) : (
-              <View style={{ gap: 6 }}>
-                {selectedConditions.map((cond) => (
-                  <View
-                    key={cond}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      paddingVertical: 4
-                    }}
-                  >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <Text style={{ color: colors.emerald, fontWeight: "900", fontSize: 15 }}>✓</Text>
-                      <Text style={{ fontSize: 14, fontWeight: "800", color: colors.text }}>{cond}</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => removeCondition(cond)}>
-                      <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "700" }}>Remove</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* Interactive Core Conditions Grid */}
-          <View style={{ gap: 8 }}>
-            <Text style={{ fontSize: 13, fontWeight: "800", color: colors.text }}>
-              Tap to Select / Deselect Health Conditions:
-            </Text>
-
+          {/* Condition Cards Grid */}
+          <View style={{ gap: 10 }}>
             {CORE_CONDITIONS.map((cond) => {
-              const isSelected = selectedConditions.includes(cond.name);
+              const isSelected = selectedConditions.includes(cond.id);
               return (
                 <TouchableOpacity
                   key={cond.id}
-                  onPress={() => toggleHealthCondition(cond.name)}
                   activeOpacity={0.8}
+                  onPress={() => toggleCondition(cond.id)}
                   style={{
                     backgroundColor: isSelected ? `${colors.emerald}15` : colors.cardAlt,
                     borderColor: isSelected ? colors.emerald : colors.border,
                     borderWidth: isSelected ? 2 : 1,
-                    borderRadius: 18,
+                    borderRadius: 20,
                     padding: 14,
                     flexDirection: "row",
                     alignItems: "center",
@@ -583,11 +721,11 @@ export default function ProfileScreen() {
                   }}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
-                    <Text style={{ fontSize: 24 }}>{cond.icon}</Text>
+                    <Text style={{ fontSize: 26 }}>{cond.icon}</Text>
                     <View style={{ flex: 1 }}>
                       <Text style={{
                         fontSize: 15,
-                        fontWeight: "800",
+                        fontWeight: "900",
                         color: isSelected ? colors.emerald : colors.text
                       }}>
                         {cond.name}
@@ -598,7 +736,6 @@ export default function ProfileScreen() {
                     </View>
                   </View>
 
-                  {/* Status Indicator Badge */}
                   <View style={{
                     backgroundColor: isSelected ? colors.emerald : `${colors.textMuted}20`,
                     width: 28,
@@ -618,32 +755,49 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               );
             })}
-          </View>
 
-          {/* Explicit Manual Save Button */}
-          <TouchableOpacity
-            onPress={() => persistProfile(profile)}
-            disabled={isSaving}
-            style={{
-              backgroundColor: colors.emerald,
-              paddingVertical: 14,
-              borderRadius: 18,
-              alignItems: "center",
-              marginTop: 6,
-              shadowColor: colors.emerald,
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.25,
-              shadowRadius: 8
-            }}
-          >
-            {isSaving ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={{ color: "#FFF", fontSize: 14, fontWeight: "900" }}>
-                ✓ Save Health Conditions to Account
-              </Text>
-            )}
-          </TouchableOpacity>
+            {/* Custom Conditions added by user */}
+            {customConditions.map((cond) => (
+              <View
+                key={cond}
+                style={{
+                  backgroundColor: `${colors.emerald}15`,
+                  borderColor: colors.emerald,
+                  borderWidth: 2,
+                  borderRadius: 20,
+                  padding: 14,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between"
+                }}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+                  <Text style={{ fontSize: 26 }}>🩺</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "900", color: colors.emerald }}>
+                      {cond}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                      Custom condition monitored during food analysis
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => removeCustomItem("health_conditions", cond)}
+                  style={{
+                    backgroundColor: `${colors.crimson}20`,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: `${colors.crimson}50`
+                  }}
+                >
+                  <Text style={{ color: colors.crimson, fontWeight: "900", fontSize: 11 }}>Remove ✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
         </View>
 
         {/* Dietary Preferences Selector */}
@@ -655,37 +809,112 @@ export default function ProfileScreen() {
           padding: 18,
           gap: 12
         }}>
-          <View>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: colors.text }}>Dietary Preferences</Text>
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-              Foods not aligning will receive score adjustments
-            </Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={{ fontSize: 16, fontWeight: "800", color: colors.text }}>Dietary Preferences</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                Foods not aligning will receive score adjustments
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowAddPref((p) => !p)}
+              style={{
+                backgroundColor: showAddPref ? `${colors.emerald}30` : `${colors.emerald}18`,
+                borderColor: colors.emerald,
+                borderWidth: 1,
+                paddingHorizontal: 12,
+                paddingVertical: 5,
+                borderRadius: 14
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.emerald }}>
+                {showAddPref ? "✕ Cancel" : "+ Add"}
+              </Text>
+            </TouchableOpacity>
           </View>
 
+          {/* Inline Add Custom Preference */}
+          {showAddPref && (
+            <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+              <TextInput
+                value={customPrefInput}
+                onChangeText={setCustomPrefInput}
+                placeholder="e.g. Halal, Mediterranean, Low-FODMAP..."
+                placeholderTextColor={colors.textDim}
+                onSubmitEditing={addCustomPreference}
+                style={{
+                  flex: 1,
+                  backgroundColor: colors.cardAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  color: colors.text,
+                  fontSize: 13,
+                  fontWeight: "600"
+                }}
+              />
+              <TouchableOpacity
+                onPress={addCustomPreference}
+                style={{
+                  backgroundColor: colors.emerald,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 12 }}>+ Add</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {ALL_PREFERENCES.map((pref) => {
-              const isSelected = profile.dietary_preferences.includes(pref);
+            {allPrefs.map((pref) => {
+              const isSelected = (profile.dietary_preferences || []).includes(pref);
+              const isCustom = !ALL_PREFERENCES.includes(pref);
               return (
-                <TouchableOpacity
+                <View
                   key={pref}
-                  onPress={() => toggleItem("dietary_preferences", pref)}
                   style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
+                    flexDirection: "row",
+                    alignItems: "center",
                     borderRadius: 16,
                     backgroundColor: isSelected ? colors.emerald : colors.cardAlt,
                     borderWidth: 1,
-                    borderColor: isSelected ? colors.emerald : colors.border
+                    borderColor: isSelected ? colors.emerald : colors.border,
+                    paddingLeft: 12,
+                    paddingRight: isCustom ? 6 : 12,
+                    paddingVertical: 6,
+                    gap: 6
                   }}
                 >
-                  <Text style={{
-                    fontSize: 12,
-                    fontWeight: isSelected ? "800" : "600",
-                    color: isSelected ? "#FFF" : colors.text
-                  }}>
-                    {isSelected ? "✓ " : ""}{pref}
-                  </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity onPress={() => toggleItem("dietary_preferences", pref)}>
+                    <Text style={{
+                      fontSize: 12,
+                      fontWeight: isSelected ? "800" : "600",
+                      color: isSelected ? "#FFF" : colors.text
+                    }}>
+                      {isSelected ? "✓ " : ""}{pref}
+                    </Text>
+                  </TouchableOpacity>
+                  {isCustom && (
+                    <TouchableOpacity
+                      onPress={() => removeCustomItem("dietary_preferences", pref)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{
+                        backgroundColor: isSelected ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.15)",
+                        borderRadius: 10,
+                        paddingHorizontal: 5,
+                        paddingVertical: 1
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: "900", color: isSelected ? "#FFF" : colors.textMuted }}>✕</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })}
           </View>
@@ -700,39 +929,114 @@ export default function ProfileScreen() {
           padding: 18,
           gap: 12
         }}>
-          <View>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: colors.crimson }}>
-              Allergies & Allergen Triggers
-            </Text>
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-              Triggers instant high-priority warnings on detected products
-            </Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={{ fontSize: 16, fontWeight: "800", color: colors.crimson }}>
+                Allergies & Allergen Triggers
+              </Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                Triggers instant high-priority warnings on detected products
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowAddAllergy((p) => !p)}
+              style={{
+                backgroundColor: showAddAllergy ? `${colors.crimson}30` : `${colors.crimson}18`,
+                borderColor: colors.crimson,
+                borderWidth: 1,
+                paddingHorizontal: 12,
+                paddingVertical: 5,
+                borderRadius: 14
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.crimson }}>
+                {showAddAllergy ? "✕ Cancel" : "+ Add"}
+              </Text>
+            </TouchableOpacity>
           </View>
 
+          {/* Inline Add Custom Allergy */}
+          {showAddAllergy && (
+            <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+              <TextInput
+                value={customAllergyInput}
+                onChangeText={setCustomAllergyInput}
+                placeholder="e.g. Sesame, Mustard, Sulfites, Fish..."
+                placeholderTextColor={colors.textDim}
+                onSubmitEditing={addCustomAllergy}
+                style={{
+                  flex: 1,
+                  backgroundColor: colors.cardAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  color: colors.text,
+                  fontSize: 13,
+                  fontWeight: "600"
+                }}
+              />
+              <TouchableOpacity
+                onPress={addCustomAllergy}
+                style={{
+                  backgroundColor: colors.crimson,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 12 }}>+ Add</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {ALL_ALLERGIES.map((al) => {
-              const isSelected = profile.allergies.includes(al);
+            {allAllergies.map((al) => {
+              const isSelected = (profile.allergies || []).includes(al);
+              const isCustom = !ALL_ALLERGIES.includes(al);
               return (
-                <TouchableOpacity
+                <View
                   key={al}
-                  onPress={() => toggleItem("allergies", al)}
                   style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
+                    flexDirection: "row",
+                    alignItems: "center",
                     borderRadius: 16,
                     backgroundColor: isSelected ? colors.crimson : colors.cardAlt,
                     borderWidth: 1,
-                    borderColor: isSelected ? colors.crimson : colors.border
+                    borderColor: isSelected ? colors.crimson : colors.border,
+                    paddingLeft: 12,
+                    paddingRight: isCustom ? 6 : 12,
+                    paddingVertical: 6,
+                    gap: 6
                   }}
                 >
-                  <Text style={{
-                    fontSize: 12,
-                    fontWeight: isSelected ? "800" : "600",
-                    color: isSelected ? "#FFF" : colors.text
-                  }}>
-                    {isSelected ? "⚠️ " : ""}{al}
-                  </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity onPress={() => toggleItem("allergies", al)}>
+                    <Text style={{
+                      fontSize: 12,
+                      fontWeight: isSelected ? "800" : "600",
+                      color: isSelected ? "#FFF" : colors.text
+                    }}>
+                      {isSelected ? "⚠️ " : ""}{al}
+                    </Text>
+                  </TouchableOpacity>
+                  {isCustom && (
+                    <TouchableOpacity
+                      onPress={() => removeCustomItem("allergies", al)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{
+                        backgroundColor: isSelected ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.15)",
+                        borderRadius: 10,
+                        paddingHorizontal: 5,
+                        paddingVertical: 1
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: "900", color: isSelected ? "#FFF" : colors.textMuted }}>✕</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })}
           </View>
@@ -747,39 +1051,114 @@ export default function ProfileScreen() {
           padding: 18,
           gap: 12
         }}>
-          <View>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: colors.blue }}>
-              Nutritional Health Goals
-            </Text>
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-              Used by the AI engine to generate personalized verdicts
-            </Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={{ fontSize: 16, fontWeight: "800", color: colors.blue }}>
+                Nutritional Health Goals
+              </Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                Used by the AI engine to generate personalized verdicts
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowAddGoal((p) => !p)}
+              style={{
+                backgroundColor: showAddGoal ? `${colors.blue}30` : `${colors.blue}18`,
+                borderColor: colors.blue,
+                borderWidth: 1,
+                paddingHorizontal: 12,
+                paddingVertical: 5,
+                borderRadius: 14
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.blue }}>
+                {showAddGoal ? "✕ Cancel" : "+ Add"}
+              </Text>
+            </TouchableOpacity>
           </View>
 
+          {/* Inline Add Custom Goal */}
+          {showAddGoal && (
+            <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+              <TextInput
+                value={customGoalInput}
+                onChangeText={setCustomGoalInput}
+                placeholder="e.g. Gut Health, Lower Cholesterol, Longevity..."
+                placeholderTextColor={colors.textDim}
+                onSubmitEditing={addCustomGoal}
+                style={{
+                  flex: 1,
+                  backgroundColor: colors.cardAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  color: colors.text,
+                  fontSize: 13,
+                  fontWeight: "600"
+                }}
+              />
+              <TouchableOpacity
+                onPress={addCustomGoal}
+                style={{
+                  backgroundColor: colors.blue,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 12 }}>+ Add</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {ALL_GOALS.map((goal) => {
-              const isSelected = profile.health_goals.includes(goal);
+            {allGoals.map((goal) => {
+              const isSelected = (profile.health_goals || []).includes(goal);
+              const isCustom = !ALL_GOALS.includes(goal);
               return (
-                <TouchableOpacity
+                <View
                   key={goal}
-                  onPress={() => toggleItem("health_goals", goal)}
                   style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
+                    flexDirection: "row",
+                    alignItems: "center",
                     borderRadius: 16,
                     backgroundColor: isSelected ? colors.blue : colors.cardAlt,
                     borderWidth: 1,
-                    borderColor: isSelected ? colors.blue : colors.border
+                    borderColor: isSelected ? colors.blue : colors.border,
+                    paddingLeft: 12,
+                    paddingRight: isCustom ? 6 : 12,
+                    paddingVertical: 6,
+                    gap: 6
                   }}
                 >
-                  <Text style={{
-                    fontSize: 12,
-                    fontWeight: isSelected ? "800" : "600",
-                    color: isSelected ? "#FFF" : colors.text
-                  }}>
-                    {isSelected ? "🎯 " : ""}{goal}
-                  </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity onPress={() => toggleItem("health_goals", goal)}>
+                    <Text style={{
+                      fontSize: 12,
+                      fontWeight: isSelected ? "800" : "600",
+                      color: isSelected ? "#FFF" : colors.text
+                    }}>
+                      {isSelected ? "🎯 " : ""}{goal}
+                    </Text>
+                  </TouchableOpacity>
+                  {isCustom && (
+                    <TouchableOpacity
+                      onPress={() => removeCustomItem("health_goals", goal)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{
+                        backgroundColor: isSelected ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.15)",
+                        borderRadius: 10,
+                        paddingHorizontal: 5,
+                        paddingVertical: 1
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: "900", color: isSelected ? "#FFF" : colors.textMuted }}>✕</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })}
           </View>
@@ -815,255 +1194,8 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* Account Switching & Auth Modal */}
-      <Modal visible={showAuthModal} transparent animationType="slide">
-        <View style={{
-          flex: 1,
-          backgroundColor: "rgba(0,0,0,0.75)",
-          justifyContent: "flex-end"
-        }}>
-          <View style={{
-            backgroundColor: colors.card,
-            borderTopLeftRadius: 28,
-            borderTopRightRadius: 28,
-            padding: 24,
-            maxHeight: "85%",
-            borderWidth: 1,
-            borderColor: colors.border
-          }}>
-            {/* Modal Header */}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>
-                {authMode === "switch" ? "Switch User Profile" : authMode === "login" ? "Login to Account" : "Create New Account"}
-              </Text>
-              <TouchableOpacity onPress={() => setShowAuthModal(false)}>
-                <Text style={{ fontSize: 18, color: colors.textMuted, padding: 4 }}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Mode Tabs */}
-            <View style={{ flexDirection: "row", gap: 8, marginBottom: 18 }}>
-              <TouchableOpacity
-                onPress={() => setAuthMode("switch")}
-                style={{
-                  flex: 1,
-                  paddingVertical: 8,
-                  borderRadius: 12,
-                  backgroundColor: authMode === "switch" ? colors.emerald : colors.cardAlt,
-                  alignItems: "center"
-                }}
-              >
-                <Text style={{ color: authMode === "switch" ? "#FFF" : colors.textMuted, fontWeight: "800", fontSize: 12 }}>
-                  Profiles
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => setAuthMode("login")}
-                style={{
-                  flex: 1,
-                  paddingVertical: 8,
-                  borderRadius: 12,
-                  backgroundColor: authMode === "login" ? colors.emerald : colors.cardAlt,
-                  alignItems: "center"
-                }}
-              >
-                <Text style={{ color: authMode === "login" ? "#FFF" : colors.textMuted, fontWeight: "800", fontSize: 12 }}>
-                  Log In
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => setAuthMode("register")}
-                style={{
-                  flex: 1,
-                  paddingVertical: 8,
-                  borderRadius: 12,
-                  backgroundColor: authMode === "register" ? colors.emerald : colors.cardAlt,
-                  alignItems: "center"
-                }}
-              >
-                <Text style={{ color: authMode === "register" ? "#FFF" : colors.textMuted, fontWeight: "800", fontSize: 12 }}>
-                  Register
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {authError && (
-              <View style={{ backgroundColor: `${colors.crimson}20`, padding: 10, borderRadius: 12, marginBottom: 14 }}>
-                <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "700" }}>{authError}</Text>
-              </View>
-            )}
-
-            {/* Mode 1: Quick Switch Accounts */}
-            {authMode === "switch" && (
-              <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 10 }}>
-                <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 4 }}>
-                  Select an account to test condition-specific AI recommendations:
-                </Text>
-
-                {userList.map((u) => {
-                  const isCurrent = u.id === activeId;
-                  return (
-                    <TouchableOpacity
-                      key={u.id}
-                      onPress={() => switchAccount(u.id)}
-                      style={{
-                        backgroundColor: isCurrent ? `${colors.emerald}15` : colors.cardAlt,
-                        borderColor: isCurrent ? colors.emerald : colors.border,
-                        borderWidth: isCurrent ? 2 : 1,
-                        borderRadius: 16,
-                        padding: 14,
-                        flexDirection: "row",
-                        alignItems: "center",
-                        justifyContent: "space-between"
-                      }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 15, fontWeight: "800", color: isCurrent ? colors.emerald : colors.text }}>
-                          {u.full_name || u.id}
-                        </Text>
-                        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                          {u.email}
-                        </Text>
-                        <Text style={{ fontSize: 11, color: colors.emerald, fontWeight: "700", marginTop: 4 }}>
-                          Conditions: {u.health_conditions?.length ? u.health_conditions.join(", ") : "None (General)"}
-                        </Text>
-                      </View>
-                      {isCurrent && (
-                        <View style={{ backgroundColor: colors.emerald, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                          <Text style={{ color: "#FFF", fontSize: 11, fontWeight: "900" }}>Active</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
-
-            {/* Mode 2: Log In */}
-            {authMode === "login" && (
-              <View style={{ gap: 12 }}>
-                <TextInput
-                  value={authEmail}
-                  onChangeText={setAuthEmail}
-                  placeholder="Email or user_id (e.g. jishan@nutrilens.ai)"
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="none"
-                  style={{
-                    backgroundColor: colors.cardAlt,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 14,
-                    padding: 12,
-                    color: colors.text
-                  }}
-                />
-                <TextInput
-                  value={authPassword}
-                  onChangeText={setAuthPassword}
-                  placeholder="Password"
-                  placeholderTextColor={colors.textMuted}
-                  secureTextEntry
-                  style={{
-                    backgroundColor: colors.cardAlt,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 14,
-                    padding: 12,
-                    color: colors.text
-                  }}
-                />
-                <TouchableOpacity
-                  onPress={handleLoginSubmit}
-                  disabled={authLoading}
-                  style={{
-                    backgroundColor: colors.emerald,
-                    paddingVertical: 14,
-                    borderRadius: 16,
-                    alignItems: "center",
-                    marginTop: 6
-                  }}
-                >
-                  {authLoading ? <ActivityIndicator color="#FFF" /> : (
-                    <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 14 }}>Log In</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Mode 3: Register */}
-            {authMode === "register" && (
-              <View style={{ gap: 12 }}>
-                <TextInput
-                  value={authFullName}
-                  onChangeText={setAuthFullName}
-                  placeholder="Full Name (e.g. Alex Morgan)"
-                  placeholderTextColor={colors.textMuted}
-                  style={{
-                    backgroundColor: colors.cardAlt,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 14,
-                    padding: 12,
-                    color: colors.text
-                  }}
-                />
-                <TextInput
-                  value={authEmail}
-                  onChangeText={setAuthEmail}
-                  placeholder="Email address"
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  style={{
-                    backgroundColor: colors.cardAlt,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 14,
-                    padding: 12,
-                    color: colors.text
-                  }}
-                />
-                <TextInput
-                  value={authPassword}
-                  onChangeText={setAuthPassword}
-                  placeholder="Create Password"
-                  placeholderTextColor={colors.textMuted}
-                  secureTextEntry
-                  style={{
-                    backgroundColor: colors.cardAlt,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 14,
-                    padding: 12,
-                    color: colors.text
-                  }}
-                />
-                <TouchableOpacity
-                  onPress={handleRegisterSubmit}
-                  disabled={authLoading}
-                  style={{
-                    backgroundColor: colors.emerald,
-                    paddingVertical: 14,
-                    borderRadius: 16,
-                    alignItems: "center",
-                    marginTop: 6
-                  }}
-                >
-                  {authLoading ? <ActivityIndicator color="#FFF" /> : (
-                    <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 14 }}>Create Account</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
-
       {/* Global Bottom Navigation */}
       <BottomNav />
     </View>
   );
 }
-

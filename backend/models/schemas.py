@@ -6,6 +6,7 @@ class UserProfile(BaseModel):
     user_id: str = "default_user"
     email: Optional[str] = None
     full_name: Optional[str] = None
+    age: Optional[int] = Field(default=None, ge=1, le=120, description="User age in years for tailored nutrition context")
     health_conditions: List[str] = Field(default_factory=list, description="e.g. Diabetes, High Blood Pressure, High Cholesterol, Obesity, Heart-related conditions, Kidney-related conditions, Gluten intolerance, Lactose intolerance")
     dietary_preferences: List[str] = Field(default_factory=list, description="e.g. Vegan, Keto, Gluten-Free, Low-Sodium, Diabetic-Friendly")
     allergies: List[str] = Field(default_factory=list, description="e.g. Peanuts, Lactose, Gluten, Soy, Tree Nuts, Shellfish")
@@ -162,10 +163,15 @@ class UserRegisterRequest(BaseModel):
     email: str
     password: str
     full_name: str
+    age: Optional[int] = None
     health_conditions: List[str] = Field(default_factory=list)
     dietary_preferences: List[str] = Field(default_factory=list)
     allergies: List[str] = Field(default_factory=list)
     health_goals: List[str] = Field(default_factory=list)
+
+class UserPasswordUpdateRequest(BaseModel):
+    user_id: Optional[str] = "default_user"
+    new_password: str
 
 class UserAuthResponse(BaseModel):
     success: bool
