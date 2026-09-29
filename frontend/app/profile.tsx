@@ -15,6 +15,7 @@ import {
   UserAccountInfo
 } from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
+import { useAuth } from "../lib/AuthContext";
 import { BottomNav } from "../components/BottomNav";
 
 const CORE_CONDITIONS = [
@@ -42,17 +43,20 @@ const ALL_GOALS = ["Weight Loss", "Muscle Gain", "Heart Health", "Diabetic Care"
 export default function ProfileScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useTheme();
+  const { userProfile: authProfile, userId: authUserId, logout, isAuthenticated } = useAuth();
 
-  const [activeId, setActiveId] = useState<string>("default_user");
-  const [profile, setProfile] = useState<UserProfile>({
-    user_id: "default_user",
-    email: "jishan@nutrilens.ai",
-    full_name: "Jishan Ahmed",
-    health_conditions: ["Diabetes", "High Blood Pressure"],
-    dietary_preferences: ["Low Sugar", "Diabetic-Friendly"],
-    allergies: ["Peanuts", "Lactose Intolerant"],
-    health_goals: ["Weight Loss", "Heart Health"]
-  });
+  const [activeId, setActiveId] = useState<string>(authUserId || "default_user");
+  const [profile, setProfile] = useState<UserProfile>(
+    authProfile || {
+      user_id: "default_user",
+      email: "jishan@nutrilens.ai",
+      full_name: "Jishan Ahmed",
+      health_conditions: ["Diabetes", "High Blood Pressure"],
+      dietary_preferences: ["Low Sugar", "Diabetic-Friendly"],
+      allergies: ["Peanuts", "Lactose Intolerant"],
+      health_goals: ["Weight Loss", "Heart Health"]
+    }
+  );
 
   const [stats, setStats] = useState<UserStatsResponse | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -73,6 +77,13 @@ export default function ProfileScreen() {
   const [customConditionInput, setCustomConditionInput] = useState("");
 
   useEffect(() => {
+    if (authProfile) {
+      setProfile(authProfile);
+      setActiveId(authProfile.user_id || "default_user");
+    }
+  }, [authProfile]);
+
+  useEffect(() => {
     const currentUid = getActiveUserId();
     setActiveId(currentUid);
     loadProfileAndStats(currentUid);
@@ -89,6 +100,18 @@ export default function ProfileScreen() {
       if (st) setStats(st);
     } catch (e) {
       console.warn("Notice loading user profile:", e);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      setActiveId("default_user");
+      await loadProfileAndStats("default_user");
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch (e) {
+      console.warn("Error logging out:", e);
     }
   };
 
@@ -305,6 +328,62 @@ export default function ProfileScreen() {
                 Switch User 👤
               </Text>
             </TouchableOpacity>
+          </View>
+
+          {/* Account Quick Action Buttons (Log In, Sign Up, Log Out) */}
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
+            <TouchableOpacity
+              onPress={() => router.push("/login")}
+              style={{
+                flex: 1,
+                backgroundColor: colors.cardAlt,
+                borderColor: colors.border,
+                borderWidth: 1,
+                paddingVertical: 10,
+                borderRadius: 14,
+                alignItems: "center"
+              }}
+            >
+              <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "800" }}>
+                🔑 Sign In
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push("/signup")}
+              style={{
+                flex: 1,
+                backgroundColor: `${colors.emerald}18`,
+                borderColor: `${colors.emerald}50`,
+                borderWidth: 1,
+                paddingVertical: 10,
+                borderRadius: 14,
+                alignItems: "center"
+              }}
+            >
+              <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "800" }}>
+                ✨ Create Account
+              </Text>
+            </TouchableOpacity>
+
+            {isAuthenticated && (
+              <TouchableOpacity
+                onPress={handleLogout}
+                style={{
+                  backgroundColor: `${colors.crimson}15`,
+                  borderColor: `${colors.crimson}50`,
+                  borderWidth: 1,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  borderRadius: 14,
+                  alignItems: "center"
+                }}
+              >
+                <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "800" }}>
+                  Log Out
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Quick Active Conditions Summary Bar */}

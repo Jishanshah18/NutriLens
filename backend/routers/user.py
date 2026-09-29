@@ -89,3 +89,22 @@ async def fetch_user_stats(user_id: str = "default_user"):
         return get_user_stats(user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/user/logout")
+async def logout_account():
+    """
+    Log out active user session.
+    """
+    return {"success": True, "message": "Logged out successfully."}
+
+
+@router.get("/user/me", response_model=UserProfile)
+async def fetch_current_user(user_id: str = "default_user"):
+    """
+    Get active user session profile.
+    """
+    try:
+        return get_user_profile(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

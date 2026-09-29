@@ -71,7 +71,10 @@ def register_new_user(req: UserRegisterRequest) -> UserAuthResponse:
         email=req.email,
         password=req.password,
         full_name=req.full_name,
-        health_conditions=req.health_conditions
+        health_conditions=req.health_conditions,
+        dietary_preferences=req.dietary_preferences,
+        allergies=req.allergies,
+        health_goals=req.health_goals
     )
     prof = UserProfile(**res["profile"])
     return UserAuthResponse(

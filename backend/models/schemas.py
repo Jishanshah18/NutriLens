@@ -163,10 +163,13 @@ class UserRegisterRequest(BaseModel):
     password: str
     full_name: str
     health_conditions: List[str] = Field(default_factory=list)
+    dietary_preferences: List[str] = Field(default_factory=list)
+    allergies: List[str] = Field(default_factory=list)
+    health_goals: List[str] = Field(default_factory=list)
 
 class UserAuthResponse(BaseModel):
     success: bool
-    user_id: str
+    user_id: str  
     email: str
     full_name: str
     token: str = "nutrilens_session_active"

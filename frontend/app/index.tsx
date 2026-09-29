@@ -12,6 +12,7 @@ import {
   ScanHistoryItem
 } from "../lib/api";
 import { useTheme } from "../lib/ThemeContext";
+import { useAuth } from "../lib/AuthContext";
 import { ScoreRing } from "../components/ScoreRing";
 import { WeeklyChart } from "../components/WeeklyChart";
 import { BottomNav } from "../components/BottomNav";
@@ -26,11 +27,18 @@ const HEALTHY_SUGGESTIONS = [
 export default function HomeScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
+  const { userProfile: authProfile, isAuthenticated } = useAuth();
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(authProfile);
   const [stats, setStats] = useState<UserStatsResponse | null>(null);
   const [recentScans, setRecentScans] = useState<ScanHistoryItem[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (authProfile) {
+      setProfile(authProfile);
+    }
+  }, [authProfile]);
 
   useEffect(() => {
     loadHomeData();
@@ -45,7 +53,7 @@ export default function HomeScreen() {
         getUserStats(activeId).catch(() => null),
         getScanHistory(activeId, 6).catch(() => [])
       ]);
-      const currentProfile = saved || prof;
+      const currentProfile = authProfile || saved || prof;
       if (currentProfile) setProfile(currentProfile);
       if (st) setStats(st);
       if (hist) setRecentScans(hist);
@@ -133,31 +141,67 @@ export default function HomeScreen() {
             )}
           </View>
 
-          {/* Quick Streak & XP Pill */}
-          <TouchableOpacity
-            onPress={() => router.push("/profile" as any)}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              borderWidth: 1,
-              borderRadius: 24,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              gap: 8
-            }}
-          >
-            <Text style={{ fontSize: 16 }}>🔥</Text>
-            <View>
-              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.text }}>
-                {stats?.current_streak || 14}d Streak
-              </Text>
-              <Text style={{ fontSize: 10, fontWeight: "700", color: colors.emerald }}>
-                {stats?.xp || 450} XP
-              </Text>
+          {/* Quick Streak, XP & Auth Account Bar */}
+          <View style={{ alignItems: "flex-end", gap: 8 }}>
+            <TouchableOpacity
+              onPress={() => router.push("/profile" as any)}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderWidth: 1,
+                borderRadius: 24,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                gap: 8
+              }}
+            >
+              <Text style={{ fontSize: 16 }}>🔥</Text>
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: "800", color: colors.text }}>
+                  {stats?.current_streak || 14}d Streak
+                </Text>
+                <Text style={{ fontSize: 10, fontWeight: "700", color: colors.emerald }}>
+                  {stats?.xp || 450} XP
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              <TouchableOpacity
+                onPress={() => router.push("/login")}
+                style={{
+                  backgroundColor: colors.cardAlt,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  paddingHorizontal: 9,
+                  paddingVertical: 4
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: "700", color: colors.emerald }}>
+                  {isAuthenticated ? "Switch" : "Log In"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => router.push("/signup")}
+                style={{
+                  backgroundColor: `${colors.emerald}18`,
+                  borderColor: `${colors.emerald}50`,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  paddingHorizontal: 9,
+                  paddingVertical: 4
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: "800", color: colors.emerald }}>
+                  Sign Up
+                </Text>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
         </View>
 
         {/* Hero Health Status Card with Animated Score Ring */}

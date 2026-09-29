@@ -427,7 +427,16 @@ class PersistentStore:
             ))
             conn.commit()
 
-    def register_user(self, email: str, password: str, full_name: str, health_conditions: Optional[List[str]] = None) -> Dict[str, Any]:
+    def register_user(
+        self,
+        email: str,
+        password: str,
+        full_name: str,
+        health_conditions: Optional[List[str]] = None,
+        dietary_preferences: Optional[List[str]] = None,
+        allergies: Optional[List[str]] = None,
+        health_goals: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         email_clean = email.strip().lower()
         now_iso = datetime.now(timezone.utc).isoformat()
         import re
@@ -453,14 +462,18 @@ class PersistentStore:
             ))
 
             conds = health_conditions or []
+            prefs = dietary_preferences or []
+            algs = allergies or []
+            goals = health_goals or []
+
             cursor.execute("""
                 INSERT OR REPLACE INTO user_profiles (user_id, dietary_preferences, allergies, health_goals, health_conditions, email, full_name, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user_id,
-                json.dumps([]),
-                json.dumps([]),
-                json.dumps([]),
+                json.dumps(prefs),
+                json.dumps(algs),
+                json.dumps(goals),
                 json.dumps(conds),
                 email_clean,
                 full_name.strip(),
@@ -483,9 +496,9 @@ class PersistentStore:
         }
         prof = {
             "user_id": user_id,
-            "dietary_preferences": [],
-            "allergies": [],
-            "health_goals": [],
+            "dietary_preferences": prefs,
+            "allergies": algs,
+            "health_goals": goals,
             "health_conditions": conds,
             "email": email_clean,
             "full_name": full_name.strip()

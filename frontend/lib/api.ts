@@ -204,6 +204,26 @@ export const setSavedUserProfile = (profile: UserProfile): void => {
   }
 };
 
+export const getAuthToken = (): string | null => {
+  if (typeof window !== "undefined" && window.localStorage) {
+    return window.localStorage.getItem("nutrilens_auth_token");
+  }
+  return null;
+};
+
+export const setAuthToken = (token: string): void => {
+  if (typeof window !== "undefined" && window.localStorage) {
+    window.localStorage.setItem("nutrilens_auth_token", token);
+  }
+};
+
+export const clearAuthSession = (): void => {
+  if (typeof window !== "undefined" && window.localStorage) {
+    window.localStorage.removeItem("nutrilens_auth_token");
+    window.localStorage.removeItem("nutrilens_active_user_id");
+  }
+};
+
 export const DEFAULT_USER_STATS: UserStatsResponse = {
   user_id: "default_user",
   current_streak: 14,
@@ -283,7 +303,10 @@ export const registerUser = async (
   email: string,
   password: string,
   fullName: string,
-  healthConditions: string[] = []
+  healthConditions: string[] = [],
+  dietaryPreferences: string[] = [],
+  allergies: string[] = [],
+  healthGoals: string[] = []
 ): Promise<UserAuthResponse> => {
   const url = getApiBaseUrl();
   const response = await fetch(`${url}/user/register`, {
@@ -293,7 +316,10 @@ export const registerUser = async (
       email,
       password,
       full_name: fullName,
-      health_conditions: healthConditions
+      health_conditions: healthConditions,
+      dietary_preferences: dietaryPreferences,
+      allergies: allergies,
+      health_goals: healthGoals
     })
   });
   if (!response.ok) {
@@ -303,6 +329,9 @@ export const registerUser = async (
   const data: UserAuthResponse = await response.json();
   setActiveUserId(data.user_id);
   setSavedUserProfile(data.profile);
+  if (data.token) {
+    setAuthToken(data.token);
+  }
   return data;
 };
 
@@ -320,7 +349,21 @@ export const loginUser = async (email: string, password: string): Promise<UserAu
   const data: UserAuthResponse = await response.json();
   setActiveUserId(data.user_id);
   setSavedUserProfile(data.profile);
+  if (data.token) {
+    setAuthToken(data.token);
+  }
   return data;
+};
+
+export const logoutUser = async (): Promise<void> => {
+  try {
+    const url = getApiBaseUrl();
+    await fetch(`${url}/user/logout`, { method: "POST" });
+  } catch (e) {
+    // Ignore network error on logout
+  } finally {
+    clearAuthSession();
+  }
 };
 
 export const getUserList = async (): Promise<UserAccountInfo[]> => {
