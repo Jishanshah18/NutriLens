@@ -10,3 +10,4 @@ python-dotenv>=1.0.1
 pillow>=10.2.0
 python-multipart>=0.0.9
 zxing-cpp>=3.1.0
+rapidocr-onnxruntime>=1.2.3

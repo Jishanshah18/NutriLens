@@ -963,9 +963,6 @@ def extract_text_from_image_base64(image_base64: str) -> str:
     try:
         image_bytes = base64.b64decode(image_base64)
         from PIL import Image, ImageEnhance, ImageOps
-        import winocr
-        import asyncio
-        import concurrent.futures
 
         img = Image.open(BytesIO(image_bytes))
 
@@ -987,37 +984,45 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             scale = 800.0 / img.width
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
 
-        async def _run_ocr_core(target_img):
-            res = await winocr.recognize_pil(target_img, "en")
-            return res.text.strip() if hasattr(res, "text") and res.text else ""
-
-        def _do_ocr(target_img):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, _run_ocr_core(target_img)).result(timeout=8.0)
-
-        # 3. Try standard image first
+        # 3. Engine 1: RapidOCR (Pure ONNX, fast, highly accurate on Linux Render & Windows)
         try:
-            extracted_text = _do_ocr(img)
-        except Exception as ocr_err:
-            print(f"Standard OCR notice: {ocr_err}")
+            from rapidocr_onnxruntime import RapidOCR
+            ocr_engine = RapidOCR()
+            result, _ = ocr_engine(np.array(img))
+            if result:
+                lines = [str(item[1]).strip() for item in result if item and len(item) > 1 and item[1]]
+                rapid_text = " ".join(lines).strip()
+                if rapid_text and len(rapid_text.split()) >= 2:
+                    return rapid_text
+        except Exception as rapid_err:
+            pass
 
-        # 4. If standard OCR returned very few words, try contrast-enhanced image
-        if not extracted_text or len(extracted_text.split()) < 3:
+        # 4. Engine 2: Windows native WinRT OCR (Windows only)
+        if os.name == 'nt':
             try:
-                enh = ImageEnhance.Contrast(img).enhance(1.5)
-                enh_text = _do_ocr(enh)
-                if len(enh_text.split()) > len(extracted_text.split()):
-                    extracted_text = enh_text
-            except Exception as enh_err:
-                print(f"Enhanced OCR notice: {enh_err}")
+                import winocr
+                import asyncio
+                import concurrent.futures
 
-        # 5. Fallback to pytesseract if installed
-        if not extracted_text:
-            try:
-                import pytesseract
-                extracted_text = pytesseract.image_to_string(img).strip()
+                async def _run_winocr(target_img):
+                    res = await winocr.recognize_pil(target_img, "en")
+                    return res.text.strip() if hasattr(res, "text") and res.text else ""
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    win_text = pool.submit(asyncio.run, _run_winocr(img)).result(timeout=6.0)
+                    if win_text and len(win_text.split()) >= 2:
+                        return win_text
             except Exception:
                 pass
+
+        # 5. Engine 3: Pytesseract fallback if installed
+        try:
+            import pytesseract
+            tess_text = pytesseract.image_to_string(img).strip()
+            if tess_text and len(tess_text.split()) >= 2:
+                return tess_text
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"Error decoding and processing image for OCR: {e}")
