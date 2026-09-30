@@ -276,6 +276,10 @@ const FALLBACK_QUIZZES: QuizQuestion[] = [
 ];
 
 export const getApiBaseUrl = (): string => {
+  // If EXPO_PUBLIC_API_URL is configured with a cloud URL (e.g. Render), prioritize it
+  if (process.env.EXPO_PUBLIC_API_URL && !process.env.EXPO_PUBLIC_API_URL.includes("localhost") && !process.env.EXPO_PUBLIC_API_URL.includes("127.0.0.1")) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
   if (typeof window !== "undefined" && window.location?.hostname) {
     const host = window.location.hostname;
     // When opened in browser on localhost or local network, connect directly to that host on port 8000
@@ -286,7 +290,7 @@ export const getApiBaseUrl = (): string => {
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
-  return "http://localhost:8000/api";
+  return "https://nutrilens-jfiv.onrender.com/api";
 };
 
 export const API_BASE_URL = getApiBaseUrl();
