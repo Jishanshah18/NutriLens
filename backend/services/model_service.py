@@ -1031,6 +1031,18 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
     Decodes base64, extracts text via OCR, and parses ingredients.
     """
     profile = user_profile or UserProfile()
+
+    # 1. First check if photo contains a readable barcode (works cross-platform via zxing-cpp)
+    try:
+        from services.barcode_service import decode_barcode_from_image
+        detected_barcode = decode_barcode_from_image(image_base64)
+        if detected_barcode:
+            barcode_res = analyze_ingredients(f"Scanned Barcode GTIN: {detected_barcode}", profile)
+            if barcode_res.is_food:
+                return barcode_res
+    except Exception as barcode_err:
+        print(f"Barcode auto-check notice: {barcode_err}")
+
     extracted_text = extract_text_from_image_base64(image_base64)
 
     if not extracted_text or not extracted_text.strip():

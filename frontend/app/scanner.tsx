@@ -623,27 +623,27 @@ export default function ScannerScreen() {
         user_profile: profile
       });
 
-      // 12s safety timeout
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000));
+      // 30s safety timeout for cloud backend inference
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 30000));
 
       const response = await Promise.race([apiCall, timeoutPromise]);
 
       // Advance to Stage 4: EVALUATING
       setSimulationStageIndex(3);
-      await sleep(500);
+      await sleep(400);
 
-      let finalResult: AnalyzeResponse;
-      if (response) {
-        finalResult = response;
-      } else {
-        // Safe offline condition fallback
-        finalResult = buildConditionAwareFallback("Nutrition Facts: Enriched grains, sugars, sodium.", "Scanned Food Label", profile);
+      if (!response) {
+        setScanStage("IDLE");
+        setScanError("The cloud analysis service took too long to respond. Please try again or scan via Barcode.");
+        return;
       }
+
+      const finalResult: AnalyzeResponse = response;
 
       // Check if item was rejected as non-food or unreadable
       if (finalResult.is_food === false && !finalResult.health_score) {
         setScanStage("IDLE");
-        setScanError(finalResult.rejection_reason || "Unable to detect nutritional or ingredient data. Please ensure the label is clearly visible.");
+        setScanError(finalResult.rejection_reason || "Unable to detect nutritional or ingredient data. Please ensure the label or barcode is clearly visible.");
         return;
       }
 
@@ -660,21 +660,10 @@ export default function ScannerScreen() {
       });
     } catch (err: any) {
       console.warn("Analysis error:", err);
-      // Try local fallback rather than leaving the user stranded
-      try {
-        const fallback = buildConditionAwareFallback("Scanned Food Product Ingredients", "Scanned Food Item", profile);
-        setScanStage("RESULT");
-        setSimulationStageIndex(4);
-        await sleep(300);
-        setScanStage("IDLE");
-        router.push({
-          pathname: "/results",
-          params: { data: JSON.stringify(fallback) }
-        });
-      } catch (inner) {
-        setScanStage("IDLE");
-        setScanError("Failed to process scan. Please ensure the food label is well lit and try again.");
-      }
+      setScanStage("IDLE");
+      setScanError(
+        err?.message || "Failed to connect to AI analysis service. Please check your network or try scanning barcode."
+      );
     }
   };
 
