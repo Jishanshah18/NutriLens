@@ -19,10 +19,12 @@ async def extract_ocr_endpoint(request: OcrExtractRequest):
     Extracts raw text from an uploaded or gallery image using high-speed local OCR.
     """
     try:
+        from services.model_service import get_last_ocr_debug
         text = extract_text_from_image_base64(request.image_base64)
         words = len(text.split()) if text else 0
+        debug_msg = get_last_ocr_debug()
         return OcrExtractResponse(
-            extracted_text=text,
+            extracted_text=text or (f"[DEBUG: {debug_msg}]" if debug_msg else ""),
             words_count=words,
             success=len(text.strip()) > 0
         )

@@ -1059,6 +1059,13 @@ def _estimate_nutrition(ocr_text: str, cleaned_text: str, nova: int, score: int)
     return _estimate_from_ingredients(f"{ocr_text} {cleaned_text}", nova, score)
 
 
+_last_ocr_debug = ""
+
+def get_last_ocr_debug() -> str:
+    global _last_ocr_debug
+    return _last_ocr_debug
+
+
 def extract_text_from_image_base64(image_base64: str) -> str:
     """
     Extracts text from a base64 encoded image using high-speed local OCR.
@@ -1165,8 +1172,12 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             if best_text and best_word_count >= 1:
                 return best_text
         except ImportError as imp_err:
+            global _last_ocr_debug
+            _last_ocr_debug = f"RapidOCR ImportError: {imp_err}"
             print(f"RapidOCR ImportError: {imp_err}")
         except Exception as rapid_err:
+            global _last_ocr_debug
+            _last_ocr_debug = f"RapidOCR error: {rapid_err}"
             print(f"RapidOCR error: {rapid_err}")
 
         # 5. Engine 2: Windows native WinRT OCR (Windows only fallback)

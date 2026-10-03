@@ -66,7 +66,7 @@ async def root():
     return {
         "status": "online",
         "app": "NutriLens API",
-        "version": "1.0.0",
+        "version": "2.1.0-render-parity",
         "docs_url": "/docs"
     }
 
