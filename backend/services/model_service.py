@@ -1072,6 +1072,7 @@ def extract_text_from_image_base64(image_base64: str) -> str:
     Uses RapidOCR (ONNX) as primary engine with enhanced preprocessing
     and multi-orientation passes for maximum text extraction from real-world photos.
     """
+    global _last_ocr_debug, _rapidocr_engine
     if not image_base64:
         return ""
 
@@ -1131,8 +1132,7 @@ def extract_text_from_image_base64(image_base64: str) -> str:
 
         try:
             from rapidocr_onnxruntime import RapidOCR
-            global _rapidocr_engine
-            if '_rapidocr_engine' not in globals() or _rapidocr_engine is None:
+            if _rapidocr_engine is None:
                 _rapidocr_engine = RapidOCR()
             ocr_engine = _rapidocr_engine
 
@@ -1172,11 +1172,9 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             if best_text and best_word_count >= 1:
                 return best_text
         except ImportError as imp_err:
-            global _last_ocr_debug
             _last_ocr_debug = f"RapidOCR ImportError: {imp_err}"
             print(f"RapidOCR ImportError: {imp_err}")
         except Exception as rapid_err:
-            global _last_ocr_debug
             _last_ocr_debug = f"RapidOCR error: {rapid_err}"
             print(f"RapidOCR error: {rapid_err}")
 
