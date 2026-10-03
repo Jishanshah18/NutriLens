@@ -1164,8 +1164,8 @@ def extract_text_from_image_base64(image_base64: str) -> str:
 
             if best_text and best_word_count >= 1:
                 return best_text
-        except ImportError:
-            pass
+        except ImportError as imp_err:
+            print(f"RapidOCR ImportError: {imp_err}")
         except Exception as rapid_err:
             print(f"RapidOCR error: {rapid_err}")
 
