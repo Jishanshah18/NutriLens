@@ -33,10 +33,15 @@ app = FastAPI(
     openapi_tags=tags_metadata
 )
 
-# Initialize and warm up ML models on startup
+# Initialize and warm up ML models and SQLite catalog on startup
 @app.on_event("startup")
 async def startup_event():
     load_models()
+    try:
+        from services.nutrition_service import init_food_catalog
+        init_food_catalog()
+    except Exception as e:
+        print(f"Notice initializing SQLite food catalog: {e}")
 
 # Configure CORS for React Native / Expo / Web frontend
 app.add_middleware(

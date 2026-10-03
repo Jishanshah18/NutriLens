@@ -13,20 +13,43 @@ FOOD_INGREDIENT_TOKENS = {
     "quinoa", "buckwheat", "semolina", "tapioca", "starch", "cornstarch", "potato", "chia",
     "flaxseed", "sesame", "sunflower", "pumpkin", "hemp", "gluten", "bran", "cereal",
 
+    # Bakery, Breads & Baked Goods
+    "biscuit", "biscuits", "cookie", "cookies", "cracker", "crackers", "wafer", "wafers",
+    "rusk", "toast", "bread", "bun", "pav", "roti", "chapati", "paratha", "naan", "cake",
+    "muffin", "pastry", "croissant", "dough",
+
+    # Noodles, Pasta & Instant Meals
+    "noodle", "noodles", "ramen", "pasta", "macaroni", "spaghetti", "vermicelli", "chowmein",
+    "maggi", "tastemaker", "instant noodles", "cup noodles",
+
+    # Packaged Snacks, Crisps & Namkeen
+    "chips", "crisps", "namkeen", "bhujia", "sev", "mixture", "snack", "snacks", "popcorn",
+    "puff", "puffs", "kurkure", "papad", "wafer", "nachos", "tortilla chips",
+
     # Sugars, Sweeteners & Syrups
     "sugar", "sucrose", "glucose", "fructose", "dextrose", "maltose", "lactose", "maltodextrin",
     "syrup", "honey", "molasses", "cane", "stevia", "aspartame", "sucralose", "acesulfame",
     "erythritol", "xylitol", "sorbitol", "caramel", "treacle", "agave",
 
+    # Confectionery, Sweets & Chocolates
+    "chocolate", "chocolates", "candy", "candies", "toffee", "fudge", "gummies", "cocoa",
+    "cacao", "mithai", "laddu", "barfi", "halwa", "kheer", "sweet", "sweets",
+
+    # Beverages, Soft Drinks & Juices
+    "drink", "drinks", "beverage", "beverages", "soft drink", "soda", "cola", "coca-cola",
+    "coca cola", "pepsi", "sprite", "fanta", "thums up", "juice", "juices", "nectar",
+    "squash", "tea", "chai", "coffee", "espresso", "shake", "smoothie", "maaza", "frooti",
+
     # Oils, Fats & Dairy
     "oil", "butter", "margarine", "fat", "lard", "shortening", "ghee", "milk", "cream",
     "cheese", "cheddar", "mozzarella", "parmesan", "ricotta", "yogurt", "curd", "whey",
     "casein", "buttermilk", "palm", "canola", "sunflower", "soybean", "olive", "coconut",
+    "paneer", "dahi", "lassi", "chaas", "khoya", "mawa",
 
     # Proteins, Meats & Plant Proteins
     "chicken", "beef", "pork", "turkey", "fish", "salmon", "tuna", "shrimp", "egg", "eggs",
     "albumin", "egg yolk", "tofu", "tempeh", "soy", "soya", "soybean", "lentil", "lentils",
-    "pea", "peas", "bean", "beans", "chickpea", "edamame", "protein",
+    "pea", "peas", "bean", "beans", "chickpea", "edamame", "protein", "dal", "daal",
 
     # Fruits & Vegetables
     "apple", "banana", "berry", "blueberries", "strawberries", "raspberries", "orange", "lemon",
@@ -38,31 +61,55 @@ FOOD_INGREDIENT_TOKENS = {
     "pecan", "hazelnut", "macadamia",
 
     # Flavorings, Spices, Extracts & Additives
-    "salt", "sea salt", "sodium", "pepper", "cinnamon", "vanilla", "cacao", "cocoa", "chocolate",
-    "yeast", "vinegar", "citric acid", "malic acid", "ascorbic acid", "lecithin", "pectin",
-    "gelatin", "xanthan", "guar gum", "flavor", "flavour", "flavoring", "seasoning", "spice",
-    "spices", "herb", "herbs", "curry", "paprika", "turmeric", "oregano", "basil", "parsley",
-    "preservative", "antioxidant", "emulsifier", "color", "colour", "extract", "juice", "puree",
-    "concentrate", "coffee", "tea", "water"
+    "salt", "sea salt", "sodium", "pepper", "cinnamon", "vanilla", "yeast", "vinegar",
+    "citric acid", "malic acid", "ascorbic acid", "lecithin", "pectin", "gelatin",
+    "xanthan", "guar gum", "flavor", "flavour", "flavoring", "seasoning", "spice",
+    "spices", "herb", "herbs", "curry", "paprika", "turmeric", "oregano", "basil",
+    "parsley", "preservative", "antioxidant", "emulsifier", "color", "colour",
+    "extract", "puree", "concentrate", "water", "masala", "sauce", "ketchup",
+    "mayo", "mayonnaise", "jam", "jelly", "pickle", "chutney",
+
+    # Iconic Packaged Food Brands & Products
+    "parle", "britannia", "amul", "nestle", "cadbury", "lays", "haldiram", "bingo",
+    "doritos", "pringles", "oreo", "kitkat", "snickers", "bournvita", "horlicks",
+    "complan", "kelloggs", "saffola", "fortune", "tata", "kissan", "knorr", "mtr",
+    "dabur", "patanjali", "mother dairy", "epigamia", "paper boat", "nutella",
+    "ferrero", "sunfeast", "dark fantasy", "good day", "marie gold", "bourbon",
+    "monaco", "frooti", "appy", "limca", "mirinda", "mountain dew", "sting",
+    "monster", "red bull", "cheetos", "chocos", "boost", "nescafe", "bru",
+    "lipton", "taj mahal", "red label", "bikaji", "balaji", "quaker", "tropicana",
+    "hershey", "mars", "twix", "bounty", "milka", "lindt", "toblerone", "m&m"
 }
 
 # Standard Nutrition Facts panel terminology
 NUTRITION_FACTS_TERMS = {
-    "nutrition facts", "serving size", "servings per container", "servings",
-    "calories", "calorie", "kcal", "total fat", "saturated fat", "trans fat",
+    "nutrition facts", "nutrition information", "nutritional information", "nutritional facts",
+    "nutritional values", "serving size", "servings per container", "servings", "approximate values",
+    "calories", "calorie", "kcal", "energy", "kj", "total fat", "saturated fat", "trans fat",
     "cholesterol", "sodium", "total carbohydrate", "carbohydrate", "carbohydrates",
-    "carbs", "dietary fiber", "fiber", "sugars", "added sugars", "protein",
-    "vitamin", "vitamins", "calcium", "iron", "potassium", "daily value", "% dv"
+    "carbs", "dietary fiber", "dietary fibre", "fiber", "fibre", "sugars", "added sugars",
+    "protein", "vitamin", "vitamins", "calcium", "iron", "potassium", "daily value", "% dv",
+    "per 100g", "per 100ml", "per serving", "net weight", "net wt", "net quantity", "fssai"
 }
 
-# Ingredient list headings
+# Ingredient list headings & packaging indicators
 FOOD_HEADING_PATTERNS = [
     r'\bingredients?\s*[:\-]',
     r'\bcontents?\s*[:\-]',
     r'\bcontains?\s*[:\-]',
     r'\bingrédients?\s*[:\-]',
     r'\bingredientes?\s*[:\-]',
-    r'\ballergen (advice|information)\b'
+    r'\ballergen (advice|information)\b',
+    r'\bnutritional (information|facts|values)\b',
+    r'\bper 100\s*(g|ml)\b',
+    r'\benergy\s*[:\-]?\s*\d+\s*(kcal|kj)\b',
+    r'\bfssai\b',
+    r'\bnet (quantity|content|weight|wt)\b',
+    r'\bbest before\b',
+    r'\bmfg (date|dt)\b',
+    r'\bbatch (no|number)\b',
+    r'\bmanufactured (by|in|for)\b',
+    r'\bstore in a (cool|dry)\b'
 ]
 
 # Non-Food & Foreign Object Keywords
@@ -162,23 +209,25 @@ def classify_food_item(text: str) -> Tuple[bool, str, Dict[str, Any]]:
             stats
         )
 
-    # Rule C: Clear Food or Nutrition indicators found
-    if has_food_header or len(nutrition_matches) >= 2 or len(food_matches) >= 2 or has_e_codes:
+    # Rule C: Food or Nutrition indicators found
+    if has_food_header or len(nutrition_matches) >= 1 or len(food_matches) >= 1 or has_e_codes:
+        sample_food = food_matches[0] if food_matches else (nutrition_matches[0] if nutrition_matches else "Packaging Data")
         return (
             True,
-            "Recognized Food Product: Food ingredients or nutrition facts successfully identified.",
+            f"Recognized Food Product: Food item or nutrition indicators successfully identified ('{sample_food}').",
             stats
         )
 
-    # Rule D: Single food word in a reasonably short text (e.g. "Cheddar Cheese")
-    if len(food_matches) == 1 and len(words) <= 8 and len(non_food_matches) == 0:
+    # Rule D: Food packaging measurements or serving patterns (e.g. "Net Wt 50g", "120 kcal", "Batch No")
+    has_food_measurement = bool(re.search(r'\b\d+\s*(g|gm|gms|kg|ml|kcal|cal|kj)\b', text_lower))
+    if has_food_measurement and len(non_food_matches) == 0:
         return (
             True,
-            f"Recognized Food Product: Identified edible item '{food_matches[0]}'.",
+            "Recognized Food Product: Packaging measurements and nutritional units detected.",
             stats
         )
 
-    # Rule E: No food markers whatsoever
+    # Rule E: No food markers whatsoever and completely unidentifiable
     return (
         False,
         "Unrecognized Content: No food ingredients, additives, or nutrition facts were found in this scan.",

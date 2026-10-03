@@ -275,16 +275,75 @@ const FALLBACK_QUIZZES: QuizQuestion[] = [
   }
 ];
 
+// Candidate backend URLs in priority order:
+// 1. Explicit environment variable
+// 2. Local machine backend (FastAPI on 8000)
+// 3. Fallback remote cloud backend (Render)
+const CANDIDATE_BASE_URLS: string[] = [
+  process.env.EXPO_PUBLIC_API_URL,
+  "http://127.0.0.1:8000/api",
+  "http://localhost:8000/api",
+  "https://nutrilens-jfiv.onrender.com/api"
+].filter(Boolean) as string[];
+
+let _cachedWorkingUrl: string | null = null;
+
 export const getApiBaseUrl = (): string => {
-  // If explicitly configured to use local backend, respect it
-  if (process.env.EXPO_PUBLIC_API_URL && (process.env.EXPO_PUBLIC_API_URL.includes("127.0.0.1") || process.env.EXPO_PUBLIC_API_URL.includes("localhost"))) {
-    return process.env.EXPO_PUBLIC_API_URL;
-  }
-  // Default to live Render cloud backend
-  return "https://nutrilens-jfiv.onrender.com/api";
+  if (_cachedWorkingUrl) return _cachedWorkingUrl;
+  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  return "http://127.0.0.1:8000/api";
 };
 
 export const API_BASE_URL = getApiBaseUrl();
+
+/**
+ * Resilient API fetcher with automatic multi-endpoint failover and timeout control.
+ * Ensures the app works seamlessly whether the local backend or cloud backend is responding.
+ */
+export async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+
+  // Prioritize cached working URL if verified in current session
+  const urlsToTry: string[] = [];
+  if (_cachedWorkingUrl) {
+    urlsToTry.push(_cachedWorkingUrl);
+  }
+  for (const candidate of CANDIDATE_BASE_URLS) {
+    const cleanCandidate = candidate.replace(/\/+$/, "");
+    if (!urlsToTry.includes(cleanCandidate)) {
+      urlsToTry.push(cleanCandidate);
+    }
+  }
+
+  let lastError: any = null;
+
+  for (const baseUrl of urlsToTry) {
+    try {
+      const fullUrl = `${baseUrl}${cleanEndpoint}`;
+      const controller = new AbortController();
+      const timeoutMs = options.method === "GET" ? 8000 : 25000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      const response = await fetch(fullUrl, {
+        ...options,
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      // Any HTTP response from the server (even 4xx/5xx) proves server connectivity
+      if (response.ok || response.status === 400 || response.status === 401 || response.status === 404 || response.status === 422) {
+        _cachedWorkingUrl = baseUrl;
+        return response;
+      }
+    } catch (err: any) {
+      lastError = err;
+      // Network failure or timeout on this URL; seamlessly try next candidate
+    }
+  }
+
+  throw lastError || new Error("Failed to connect to NutriLens backend service.");
+}
 
 export interface BackendHealthResponse {
   status: string;
@@ -296,11 +355,10 @@ export interface BackendHealthResponse {
 }
 
 export const checkBackendHealth = async (): Promise<BackendHealthResponse> => {
-  const url = getApiBaseUrl();
-  const response = await fetch(`${url}/health`, { method: "GET" });
+  const response = await apiFetch("/health", { method: "GET" });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
-  return { ...data, url };
+  return { ...data, url: getApiBaseUrl() };
 };
 
 export const registerUser = async (
@@ -440,8 +498,7 @@ export const updateUserProfile = async (profile: UserProfile): Promise<UserProfi
 
 export const analyzeLabel = async (requestData: AnalyzeRequest): Promise<AnalyzeResponse> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/analyze-label`, {
+    const response = await apiFetch("/analyze-label", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -462,8 +519,7 @@ export const analyzeLabel = async (requestData: AnalyzeRequest): Promise<Analyze
 
 export const analyzeLabelImage = async (requestData: AnalyzeImageRequest): Promise<AnalyzeResponse> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/analyze-image`, {
+    const response = await apiFetch("/analyze-image", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -490,8 +546,7 @@ export interface OcrExtractResult {
 
 export const extractOcrText = async (imageBase64: string): Promise<OcrExtractResult> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/extract-ocr`, {
+    const response = await apiFetch("/extract-ocr", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -512,8 +567,7 @@ export const extractOcrText = async (imageBase64: string): Promise<OcrExtractRes
 
 export const lookupBarcode = async (barcode: string, userId: string = "default_user"): Promise<AnalyzeResponse> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/barcode/${encodeURIComponent(barcode)}?user_id=${encodeURIComponent(userId)}`, {
+    const response = await apiFetch(`/barcode/${encodeURIComponent(barcode)}?user_id=${encodeURIComponent(userId)}`, {
       method: "GET",
       headers: {
         "Accept": "application/json"
@@ -536,8 +590,7 @@ export const analyzeBarcodeImage = async (
   userProfile?: UserProfile
 ): Promise<AnalyzeResponse> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/barcode/scan-image`, {
+    const response = await apiFetch("/barcode/scan-image", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
