@@ -35,145 +35,7 @@ import { BottomNav } from "../components/BottomNav";
 
 type ScanStage = "IDLE" | "SCANNING" | "PROCESSING" | "ANALYZING" | "RESULT";
 
-// Fallback offline condition evaluator if backend connection times out
-function buildConditionAwareFallback(
-  text: string = "",
-  name: string = "Scanned Food Item",
-  profile?: UserProfile
-): AnalyzeResponse {
-  const textLower = (text || "").toLowerCase();
-  const conditions = profile?.health_conditions || [];
 
-  const additives: Array<{ code: string; name: string; risk_level: string; description: string }> = [];
-  if (textLower.includes("e621") || textLower.includes("monosodium glutamate") || textLower.includes("msg")) {
-    additives.push({ code: "E621", name: "Monosodium Glutamate", risk_level: "Moderate", description: "Flavor enhancer." });
-  }
-  if (textLower.includes("e150") || textLower.includes("caramel color")) {
-    additives.push({ code: "E150d", name: "Caramel IV", risk_level: "Moderate", description: "Industrial coloring agent." });
-  }
-  if (textLower.includes("e951") || textLower.includes("aspartame")) {
-    additives.push({ code: "E951", name: "Aspartame", risk_level: "High", description: "High-intensity artificial sweetener." });
-  }
-
-  const allergens: string[] = [];
-  if (textLower.includes("wheat") || textLower.includes("flour") || textLower.includes("gluten")) allergens.push("Gluten / Wheat");
-  if (textLower.includes("milk") || textLower.includes("cheese") || textLower.includes("dairy")) allergens.push("Dairy / Lactose");
-  if (textLower.includes("peanut")) allergens.push("Peanuts");
-  if (textLower.includes("soy")) allergens.push("Soy");
-
-  const hasProcessedOil = textLower.includes("palm oil") || textLower.includes("hydrogenated");
-  const isHighSugarItem = textLower.includes("sugar") || textLower.includes("syrup") || textLower.includes("sweetener");
-  const isHighSodiumItem = textLower.includes("salt") || textLower.includes("sodium") || textLower.includes("ramen");
-
-  // Simulated estimated macros
-  const calories = isHighSugarItem ? 280 : 160;
-  const sugar_g = isHighSugarItem ? 22 : 3;
-  const sodium_mg = isHighSodiumItem ? 640 : 120;
-  const fat_g = hasProcessedOil ? 12 : 4;
-  const protein_g = 6;
-  const fiber_g = 2.5;
-
-  // Build Personalized Recommendation based on user's active health conditions
-  const key_concerns: string[] = [];
-  const reasons: string[] = [];
-  const positive_notes: string[] = [];
-  let status: "Good Choice" | "Suitable" | "Moderately Suitable" | "Limit" | "Not Recommended" = "Suitable";
-
-  if (conditions.includes("Diabetes")) {
-    if (sugar_g > 10) {
-      status = "Not Recommended";
-      key_concerns.push(`High Sugar Content (${sugar_g}g per serving)`);
-      reasons.push("Product contains high simple sugars which may cause rapid blood glucose spikes.");
-    } else {
-      positive_notes.push("Low glycemic load aligns well with blood glucose management.");
-    }
-  }
-
-  if (conditions.includes("High Blood Pressure")) {
-    if (sodium_mg > 400) {
-      status = "Not Recommended";
-      key_concerns.push(`High Sodium (${sodium_mg}mg per serving)`);
-      reasons.push("Elevated sodium may contribute to fluid retention and increased arterial pressure.");
-    } else {
-      positive_notes.push("Low sodium profile supports vascular health and blood pressure targets.");
-    }
-  }
-
-  if (conditions.includes("High Cholesterol")) {
-    if (fat_g > 8 || hasProcessedOil) {
-      if (status !== "Not Recommended") status = "Limit";
-      key_concerns.push("Contains saturated or processed oils");
-      reasons.push("Refined fats may elevate LDL cholesterol and arterial plaque risk.");
-    }
-  }
-
-  if (conditions.includes("Obesity / Weight Management")) {
-    if (calories > 250) {
-      if (status === "Suitable") status = "Limit";
-      key_concerns.push(`Higher Caloric Density (${calories} kcal)`);
-    }
-  }
-
-  if (conditions.length === 0) {
-    if (hasProcessedOil || additives.length > 0) {
-      status = "Moderately Suitable";
-      reasons.push("Moderately processed formulation. Contains synthetic additives.");
-    } else {
-      status = "Good Choice";
-      positive_notes.push("Wholesome nutritional makeup suitable for general wellness.");
-    }
-  }
-
-  const rec: PersonalizedRecommendation = {
-    status: status,
-    headline: status === "Not Recommended"
-      ? "Not Recommended For Your Health Profile"
-      : status === "Limit"
-      ? "Consider Limiting Consumption"
-      : "Suitable For Your Health Profile",
-    health_conditions_considered: conditions.length > 0 ? conditions : ["General Wellness"],
-    reasons: reasons.length > 0 ? reasons : ["Evaluated based on clinical nutritional thresholds."],
-    key_concerns: key_concerns,
-    positive_notes: positive_notes.length > 0 ? positive_notes : ["Contains beneficial macronutrients."],
-    better_alternative: status === "Not Recommended" ? "Unsweetened whole grain rolled oats with chia seeds or fresh fruit" : null,
-    medical_disclaimer: "AI nutritional guidance only. Not a medical diagnosis. Consult a healthcare professional before altering your medical diet."
-  };
-
-  const healthScore = status === "Not Recommended" ? 38 : status === "Limit" ? 58 : 88;
-
-  return {
-    is_food: true,
-    product_name: name,
-    brand: "Scanned Food Label",
-    category: "Food & Beverage",
-    health_score: healthScore,
-    nova_group: hasProcessedOil ? 4 : additives.length > 0 ? 3 : 1,
-    allergen_flags: allergens,
-    ingredient_risks: hasProcessedOil ? ["Contains refined/industrial oils."] : [],
-    positive_attributes: positive_notes,
-    additives: additives,
-    nutrition_estimate: {
-      calories,
-      sugar_g,
-      sodium_mg,
-      fat_g,
-      protein_g,
-      fiber_g,
-      is_estimated: true,
-      source: "Scanned Label Extraction"
-    },
-    healthier_alternatives: [
-      {
-        name: "Organic Whole Food Alternative",
-        reason: "Zero refined sugars, natural fiber matrix, low sodium.",
-        estimated_health_score: 94
-      }
-    ],
-    personalized_verdict: rec.headline + ": " + (rec.reasons[0] || "Nutritional evaluation completed."),
-    personalized_recommendation: rec,
-    ocr_text: text || "Ingredients scanned from packaging."
-  };
-}
 
 export default function ScannerScreen() {
   const router = useRouter();
@@ -194,35 +56,7 @@ export default function ScannerScreen() {
   const [isBarcodeLoading, setIsBarcodeLoading] = useState(false);
   const [showManualBarcode, setShowManualBarcode] = useState(false);
 
-  const BARCODE_PRESETS = [
-    { label: "Nutella", code: "3017620422003", icon: "🍫" },
-    { label: "Coca-Cola", code: "5449000000996", icon: "🥤" },
-    { label: "Lay's Chips", code: "8901491101837", icon: "🥔" },
-    { label: "Maggi Noodles", code: "8901058852898", icon: "🍜" },
-  ];
 
-  const LABEL_PRESETS = [
-    {
-      label: "Oat Cookies",
-      icon: "🍪",
-      text: "OAT CRUNCH COOKIES\nIngredients: Rolled oats, whole wheat flour, cane sugar, palm oil, honey, salt, cinnamon, baking soda, soy lecithin.\nNutrition Facts per 100g:\nEnergy: 450 kcal\nProtein: 8.5g\nCarbohydrate: 65g\nTotal Sugar: 18g\nFat: 16g\nSodium: 280mg"
-    },
-    {
-      label: "Lay's Chips",
-      icon: "🥔",
-      text: "LAY'S CLASSIC POTATO CHIPS\nCrispy & Fresh\nIngredients: Potatoes, edible vegetable oil, iodised salt.\nEnergy: 540 kcal\nTotal Fat: 33g\nCarbohydrate: 53g\nSodium: 520mg"
-    },
-    {
-      label: "Coca-Cola",
-      icon: "🥤",
-      text: "COCA COLA Original Taste\n330 ml\nServing: 1 can\nCalories 140\nSugars 39g\nSodium 45mg\nIngredients: Carbonated water, high fructose corn syrup, caramel color, phosphoric acid, natural flavors, caffeine."
-    },
-    {
-      label: "Maggi Noodles",
-      icon: "🍜",
-      text: "MAGGI 2-MINUTE NOODLES\nMasala Noodles with Tastemaker\nIngredients: Wheat flour, palm oil, salt, wheat gluten.\nTastemaker: Hydrolysed peanut protein, mixed spices, onion powder, sugar, salt, garlic powder."
-    }
-  ];
 
   // Live Camera Stream State
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -658,20 +492,17 @@ export default function ScannerScreen() {
       let finalResult: AnalyzeResponse;
 
       if (!response) {
-        // Fallback: build condition-aware nutritional assessment if service timed out
-        finalResult = buildConditionAwareFallback(
-          "Packaged Food Item\nIngredients: Natural whole food ingredients.",
-          "Scanned Food Item",
-          profile
-        );
-      } else {
-        finalResult = response;
+        setScanStage("IDLE");
+        setScanError("Scan analysis timed out. Please check your network connection and try scanning again.");
+        return;
       }
 
+      finalResult = response;
+
       // Check if item was rejected as non-food or unreadable
-      if (finalResult.is_food === false && !finalResult.health_score) {
+      if (finalResult.is_food === false || !finalResult.health_score) {
         setScanStage("IDLE");
-        setScanError(finalResult.rejection_reason || "Unable to detect nutritional or ingredient data. Please ensure the label or barcode is clearly visible.");
+        setScanError(finalResult.rejection_reason || finalResult.personalized_verdict || "Unable to read nutritional or ingredient data. Please ensure the label is clearly visible and well-lit.");
         return;
       }
 
@@ -680,34 +511,18 @@ export default function ScannerScreen() {
       setSimulationStageIndex(4);
       await sleep(100);
 
-      // Cleanly transition to results page (scanner UI unmounts/hides)
+      // Cleanly transition to results page with genuine data
       setScanStage("IDLE");
       router.push({
         pathname: "/results",
         params: { data: JSON.stringify(finalResult) }
       });
     } catch (err: any) {
-      console.warn("Analysis notice, recovering with local analysis:", err);
-      try {
-        const fallback = buildConditionAwareFallback(
-          "Packaged Food Product\nIngredients: Wholesome food ingredients.",
-          "Scanned Food Product",
-          profile
-        );
-        setScanStage("RESULT");
-        setSimulationStageIndex(4);
-        await sleep(100);
-        setScanStage("IDLE");
-        router.push({
-          pathname: "/results",
-          params: { data: JSON.stringify(fallback) }
-        });
-      } catch (fallbackErr) {
-        setScanStage("IDLE");
-        setScanError(
-          err?.message || "Failed to analyze food packaging. Please try scanning again."
-        );
-      }
+      console.warn("Scan analysis error:", err);
+      setScanStage("IDLE");
+      setScanError(
+        err?.message || "Failed to analyze food packaging label. Please ensure the label is clearly visible and try scanning again."
+      );
     }
   };
 
@@ -809,39 +624,20 @@ export default function ScannerScreen() {
         return;
       }
 
-      // If backend returned non-food or no match, provide condition-aware nutritional analysis
-      const fallback = buildConditionAwareFallback(
-        `Scanned Product Barcode GTIN: ${cleanCode}`,
-        `Packaged Food (${cleanCode})`,
-        profile
+      // Genuine feedback: barcode not found in database
+      setIsBarcodeLoading(false);
+      setScanStage("IDLE");
+      setScanError(
+        response?.rejection_reason ||
+        `Barcode "${cleanCode}" was not found in our food database. Please switch to "Food Label" mode and capture the nutrition facts or ingredients directly.`
       );
-      setSimulationStageIndex(4);
-      setScanStage("RESULT");
-      setTimeout(() => {
-        setScanStage("IDLE");
-        setIsBarcodeLoading(false);
-        router.push({
-          pathname: "/results",
-          params: { data: JSON.stringify(fallback) }
-        });
-      }, 400);
     } catch (err: any) {
-      console.warn("Barcode lookup notice, providing intelligent estimate:", err);
-      const fallback = buildConditionAwareFallback(
-        `Scanned Product Barcode GTIN: ${cleanCode}`,
-        `Packaged Food (${cleanCode})`,
-        profile
+      console.warn("Barcode lookup error:", err);
+      setIsBarcodeLoading(false);
+      setScanStage("IDLE");
+      setScanError(
+        `Unable to find product for barcode "${cleanCode}". Please verify the number or take a clear photo of the nutrition label.`
       );
-      setSimulationStageIndex(4);
-      setScanStage("RESULT");
-      setTimeout(() => {
-        setScanStage("IDLE");
-        setIsBarcodeLoading(false);
-        router.push({
-          pathname: "/results",
-          params: { data: JSON.stringify(fallback) }
-        });
-      }, 400);
     }
   };
 
@@ -908,62 +704,10 @@ export default function ScannerScreen() {
     }
     // If not detected from camera frame, open manual entry with guidance
     setShowManualBarcode(true);
-    setScanError("Align the barcode closer to the slot, or select a preset / enter numbers below directly.");
+    setScanError("Align the barcode closer to the slot, or enter the barcode numbers below directly.");
   };
 
-  // Quick Test Sample Label Runner
-  const handleTestLabelSample = async (preset: { label: string; text: string }) => {
-    setScanError(null);
-    setScanStage("ANALYZING");
-    setSimulationStageIndex(2);
 
-    if (Platform.OS === "web" && typeof document !== "undefined") {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = 600;
-        canvas.height = 700;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.fillStyle = "#F8FAFC";
-          ctx.fillRect(0, 0, 600, 700);
-          ctx.fillStyle = "#0F172A";
-          ctx.font = "bold 24px sans-serif";
-          const lines = preset.text.split("\n");
-          let y = 50;
-          for (let i = 0; i < lines.length; i++) {
-            if (i > 0) ctx.font = "17px sans-serif";
-            ctx.fillText(lines[i], 30, y);
-            y += 34;
-          }
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-          const b64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
-          if (b64) {
-            setSelectedImageUri(dataUrl);
-            runSimulationAndAnalyze(b64);
-            return;
-          }
-        }
-      } catch (e) {
-        console.log("Canvas sample creation note:", e);
-      }
-    }
-
-    try {
-      const res = await analyzeLabel(preset.text, profile);
-      setSimulationStageIndex(4);
-      setScanStage("RESULT");
-      setTimeout(() => {
-        setScanStage("IDLE");
-        router.push({
-          pathname: "/results",
-          params: { data: JSON.stringify(res) }
-        });
-      }, 300);
-    } catch (e: any) {
-      setScanStage("IDLE");
-      setScanError("Failed to analyze sample label.");
-    }
-  };
 
   return (
     <View style={{ flex: 1, backgroundColor: "#060A13" }}>
@@ -1558,37 +1302,6 @@ export default function ScannerScreen() {
               </Text>
             </TouchableOpacity>
 
-            {/* Quick Test Nutrition Label Chips */}
-            <View style={{ gap: 8, marginTop: 14 }}>
-              <Text style={{ color: "#94A3B8", fontSize: 11, fontWeight: "700", marginLeft: 4 }}>
-                ⚡ Quick Test Sample Labels:
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {LABEL_PRESETS.map((item) => (
-                  <TouchableOpacity
-                    key={item.label}
-                    onPress={() => handleTestLabelSample(item)}
-                    disabled={scanStage !== "IDLE"}
-                    style={{
-                      backgroundColor: "rgba(16, 185, 129, 0.12)",
-                      borderColor: "rgba(16, 185, 129, 0.35)",
-                      borderWidth: 1,
-                      borderRadius: 12,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6
-                    }}
-                  >
-                    <Text style={{ fontSize: 13 }}>{item.icon}</Text>
-                    <Text style={{ color: "#D1FAE5", fontSize: 12, fontWeight: "700" }}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
           </View>
         ) : (
           <View style={{
@@ -1722,40 +1435,6 @@ export default function ScannerScreen() {
               </View>
             )}
 
-            {/* Quick Test Barcode Chips */}
-            <View style={{ gap: 8 }}>
-              <Text style={{ color: "#94A3B8", fontSize: 11, fontWeight: "700", marginLeft: 4 }}>
-                ⚡ Quick Test Barcodes:
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {BARCODE_PRESETS.map((item) => (
-                  <TouchableOpacity
-                    key={item.code}
-                    onPress={() => {
-                      setBarcodeInput(item.code);
-                      handleBarcodeDetected(item.code);
-                    }}
-                    disabled={isBarcodeLoading}
-                    style={{
-                      backgroundColor: "rgba(6, 182, 212, 0.12)",
-                      borderColor: "rgba(6, 182, 212, 0.35)",
-                      borderWidth: 1,
-                      borderRadius: 12,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6
-                    }}
-                  >
-                    <Text style={{ fontSize: 13 }}>{item.icon}</Text>
-                    <Text style={{ color: "#E0F2FE", fontSize: 12, fontWeight: "700" }}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
           </View>
         )}
 

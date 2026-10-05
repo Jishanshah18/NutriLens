@@ -694,9 +694,11 @@ def _extract_smart_product_name(ocr_text: str, catalog_match: Optional[Dict[str,
     if primary and len(primary[0]) >= 3:
         clean_res = primary[0][:45].strip()
         clean_res = re.sub(r'\bProduct\b', '', clean_res, flags=re.I).strip()
-        return clean_res.title()
+        single_ing = {"water", "sugar", "salt", "refined wheat flour", "wheat flour", "flour", "palm oil", "edible vegetable oil", "milk solids", "vegetable oil", "oil", "yeast", "cocoa solids", "milk"}
+        if clean_res.lower() not in single_ing and len(clean_res) >= 3:
+            return clean_res.title()
 
-    return "Scanned Food Product"
+    return "Scanned Food Label"
 
 
 def _find_healthier_alternatives(cleaned_text: str, current_nova: int, current_score: int) -> List[AlternativeProduct]:

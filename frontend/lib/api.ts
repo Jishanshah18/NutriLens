@@ -323,9 +323,9 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
 
   for (const baseUrl of urlsToTry) {
     try {
-      const fullUrl = `${baseUrl}${cleanEndpoint}`;
-      const controller = new AbortController();
-      const timeoutMs = options.method === "GET" ? 8000 : 25000;
+      const isLocal = baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost");
+      const defaultTimeout = options.method === "GET" ? 8000 : 35000;
+      const timeoutMs = isLocal ? 3000 : defaultTimeout;
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(fullUrl, {

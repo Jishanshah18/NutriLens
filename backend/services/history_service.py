@@ -11,7 +11,7 @@ _recent_scan_dedup: Dict[str, tuple[float, ScanHistoryItem]] = {}
 DEDUP_WINDOW_SECONDS = 15.0
 
 def save_scan_history(analysis: AnalyzeResponse, ocr_text: str, user_id: str) -> Optional[ScanHistoryItem]:
-    if not user_id:
+    if not user_id or user_id in ["guest", ""] or user_id.startswith("test"):
         return None
 
     # RULE: Only valid food products can be saved as scan history
@@ -19,12 +19,27 @@ def save_scan_history(analysis: AnalyzeResponse, ocr_text: str, user_id: str) ->
         return None
 
     prod_name = (analysis.product_name or "").strip()
-    if not prod_name or prod_name.lower() in [
-        "unrecognized image",
-        "non-food / foreign object",
-        "unrecognized item",
-        "barcode not detected"
-    ]:
+    prod_name_lower = prod_name.lower()
+    
+    # Reject dummy names, unreadable scans, or raw ingredient/table dumps
+    if (
+        not prod_name
+        or len(prod_name) > 60
+        or prod_name_lower in [
+            "unrecognized image",
+            "non-food / foreign object",
+            "unrecognized item",
+            "barcode not detected",
+            "scanned food item",
+            "scanned food product",
+            "packaged food item",
+            "product not found"
+        ]
+        or prod_name_lower.startswith("water, high fructose")
+        or prod_name_lower.startswith("ingredients:")
+        or prod_name_lower.startswith("serving size")
+        or prod_name_lower.startswith("facts per")
+    ):
         return None
 
     # Deduplication Guard: prevent duplicate records from rapid re-renders or double taps

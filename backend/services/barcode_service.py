@@ -600,28 +600,12 @@ def lookup_barcode_online(barcode: str, timeout_seconds: float = 4.0) -> Dict[st
     except Exception as err:
         print(f"OpenFoodFacts lookup note: {err}")
 
-    # Step 4: Intelligent GS1 registered food fallback
-    # If external API is offline or the barcode is newly manufactured,
-    # recognize the registered GS1 food item instead of rejecting it as non-food!
-    country_name = resolve_gs1_country(clean_code)
+    # Step 4: If not found in any food database, return found=False honestly
+    # Do NOT invent dummy/synthetic nutrition data
     return {
-        "found": True,
-        "is_food": True,
+        "found": False,
+        "is_food": False,
         "barcode": clean_code,
-        "product_name": f"Packaged Food Item (GTIN {clean_code})",
-        "brand": f"Registered Food Producer ({country_name})",
-        "category": "Packaged Food & Beverage",
-        "ingredients_text": f"Scanned GTIN {clean_code} registered in {country_name}. For full ingredient list audit, please snapshot the packaging label in 3:4 mode.",
-        "nova_group": 3,
-        "health_score": 62,
-        "nutriments": {
-            "calories": 210.0,
-            "protein_g": 5.0,
-            "carbs_g": 28.0,
-            "fat_g": 8.0,
-            "sugar_g": 6.0,
-            "sodium_mg": 280.0
-        },
-        "source": f"GS1 Registered Product Registry ({country_name})"
+        "message": f"Barcode {clean_code} was not found in our verified food database. Please scan the nutrition facts or ingredient label directly using Food Label mode."
     }
 
