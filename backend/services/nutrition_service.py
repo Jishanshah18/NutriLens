@@ -65,53 +65,80 @@ def init_food_catalog():
     count = cursor.fetchone()[0]
 
     if count < 1000 and os.path.exists(PROCESSED_CSV):
-        print(f"Populating food_catalog table from {PROCESSED_CSV}...")
-        import pandas as pd
-        df = pd.read_csv(PROCESSED_CSV, low_memory=False)
+        print(f"Populating food_catalog table from {PROCESSED_CSV} using low-memory streaming...")
+        import csv
 
         cursor.execute("DELETE FROM food_catalog;")
         records = []
-        for _, r in df.iterrows():
-            def val(col):
-                v = r.get(col)
-                if pd.isna(v) or v is None:
-                    return None
-                return v
+        batch_size = 2000
 
-            records.append((
-                str(val("source_id") or ""),
-                str(val("food_name") or ""),
-                str(val("brand") or ""),
-                str(val("category") or ""),
-                str(val("ingredients_text") or ""),
-                str(val("ingredients_tokens") or ""),
-                val("calories"),
-                val("protein_g"),
-                val("fat_g"),
-                val("carbs_g"),
-                val("sugar_g"),
-                val("fiber_g"),
-                val("sodium_mg"),
-                val("saturated_fat_g"),
-                val("health_score"),
-                val("nova_group"),
-                str(val("allergens") or ""),
-                str(val("data_source") or "USDA FoodData Central"),
-                str(val("last_verified") or "February 2026"),
-                str(val("data_completeness") or "Partial"),
-                str(val("missing_nutrients") or "[]")
-            ))
+        def parse_float(val):
+            if val is None or val == "" or val == "nan":
+                return None
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return None
 
-        cursor.executemany("""
-            INSERT INTO food_catalog (
-                source_id, food_name, brand, category, ingredients_text, ingredients_tokens,
-                calories, protein_g, fat_g, carbs_g, sugar_g, fiber_g, sodium_mg, saturated_fat_g,
-                health_score, nova_group, allergens, data_source, last_verified,
-                data_completeness, missing_nutrients
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """, records)
+        def parse_int(val):
+            if val is None or val == "" or val == "nan":
+                return None
+            try:
+                return int(float(val))
+            except (ValueError, TypeError):
+                return None
+
+        with open(PROCESSED_CSV, "r", encoding="utf-8", errors="ignore") as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                records.append((
+                    str(r.get("source_id") or ""),
+                    str(r.get("food_name") or ""),
+                    str(r.get("brand") or ""),
+                    str(r.get("category") or ""),
+                    str(r.get("ingredients_text") or ""),
+                    str(r.get("ingredients_tokens") or ""),
+                    parse_float(r.get("calories")),
+                    parse_float(r.get("protein_g")),
+                    parse_float(r.get("fat_g")),
+                    parse_float(r.get("carbs_g")),
+                    parse_float(r.get("sugar_g")),
+                    parse_float(r.get("fiber_g")),
+                    parse_float(r.get("sodium_mg")),
+                    parse_float(r.get("saturated_fat_g")),
+                    parse_float(r.get("health_score")),
+                    parse_int(r.get("nova_group")),
+                    str(r.get("allergens") or ""),
+                    str(r.get("data_source") or "USDA FoodData Central"),
+                    str(r.get("last_verified") or "February 2026"),
+                    str(r.get("data_completeness") or "Partial"),
+                    str(r.get("missing_nutrients") or "[]")
+                ))
+
+                if len(records) >= batch_size:
+                    cursor.executemany("""
+                        INSERT INTO food_catalog (
+                            source_id, food_name, brand, category, ingredients_text, ingredients_tokens,
+                            calories, protein_g, fat_g, carbs_g, sugar_g, fiber_g, sodium_mg, saturated_fat_g,
+                            health_score, nova_group, allergens, data_source, last_verified,
+                            data_completeness, missing_nutrients
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """, records)
+                    records.clear()
+
+            if records:
+                cursor.executemany("""
+                    INSERT INTO food_catalog (
+                        source_id, food_name, brand, category, ingredients_text, ingredients_tokens,
+                        calories, protein_g, fat_g, carbs_g, sugar_g, fiber_g, sodium_mg, saturated_fat_g,
+                        health_score, nova_group, allergens, data_source, last_verified,
+                        data_completeness, missing_nutrients
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, records)
+                records.clear()
+
         conn.commit()
-        print(f"Successfully loaded {len(records)} verified food items into SQLite catalog.")
+        print("Successfully loaded verified food items into SQLite catalog with low memory footprint.")
 
     conn.close()
 

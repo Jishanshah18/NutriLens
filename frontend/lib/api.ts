@@ -277,12 +277,15 @@ const FALLBACK_QUIZZES: QuizQuestion[] = [
 
 // Candidate backend URLs in priority order:
 // 1. Explicit environment variable
-// 2. Local machine backend (FastAPI on 8000)
+const isHttpsBrowser = typeof window !== "undefined" && window.location?.protocol === "https:";
+
+// Candidate backend URLs in priority order:
+// 1. Explicit environment variable (EXPO_PUBLIC_API_URL)
+// 2. Local machine backend (FastAPI on 8000 - only when on non-HTTPS dev)
 // 3. Fallback remote cloud backend (Render)
 const CANDIDATE_BASE_URLS: string[] = [
   process.env.EXPO_PUBLIC_API_URL,
-  "http://127.0.0.1:8000/api",
-  "http://localhost:8000/api",
+  ...(isHttpsBrowser ? [] : ["http://127.0.0.1:8000/api", "http://localhost:8000/api"]),
   "https://nutrilens-jfiv.onrender.com/api"
 ].filter(Boolean) as string[];
 
@@ -291,6 +294,7 @@ let _cachedWorkingUrl: string | null = null;
 export const getApiBaseUrl = (): string => {
   if (_cachedWorkingUrl) return _cachedWorkingUrl;
   if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  if (isHttpsBrowser) return "https://nutrilens-jfiv.onrender.com/api";
   return "http://127.0.0.1:8000/api";
 };
 

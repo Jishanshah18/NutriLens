@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import analyze, user, history, engagement, model, chat
@@ -52,11 +53,31 @@ async def startup_event():
     except Exception as e:
         print(f"Notice initializing SQLite food catalog: {e}")
 
-# Configure CORS for React Native / Expo / Web frontend
+# Configure CORS origins from environment and safe local development defaults
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+allowed_origins = [
+    origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()
+]
+
+# Development origins for local web/mobile testing
+dev_origins = [
+    "http://localhost:8081",
+    "http://localhost:19006",
+    "http://localhost:3000",
+    "http://127.0.0.1:8081",
+    "http://127.0.0.1:19006",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+]
+for dev_o in dev_origins:
+    if dev_o not in allowed_origins:
+        allowed_origins.append(dev_o)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_origin_regex=r"https?://.*",
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Safely allow Vercel production and preview domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -70,12 +91,20 @@ app.include_router(history.router, prefix="/api")
 app.include_router(engagement.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 
+@app.get("/health")
+async def simple_health_check():
+    """
+    Lightweight health check endpoint for Render / Docker orchestration.
+    Does not load heavy ML or database systems.
+    """
+    return {"status": "ok"}
+
 @app.get("/")
 async def root():
     return {
         "status": "online",
         "app": "NutriLens API",
-        "version": "2.3.0-headless-wheel-fixed",
+        "version": "3.0.0-production-ready",
         "docs_url": "/docs"
     }
 
