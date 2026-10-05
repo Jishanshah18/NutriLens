@@ -234,11 +234,11 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
         if not barcode_info.get("found") or not barcode_info.get("is_food"):
             return AnalyzeResponse(
                 is_food=False,
-                rejection_reason=f"Barcode '{barcode_digits}' was not found in our global food nutrition database. It appears to belong to a non-food item or an unregistered foreign object.",
-                product_name=f"Unrecognized Item ({barcode_digits})",
+                rejection_reason=f"Barcode {barcode_digits} is not yet registered in the food database. Please switch to 'Food Label' mode to scan the ingredients label directly, or search by product name.",
+                product_name=f"Packaged Item ({barcode_digits})",
                 health_score=0,
                 nova_group=None,
-                personalized_verdict=f"⚠️ Unrecognized Barcode: GTIN {barcode_digits} does not match any edible food or nutrition product in our database.",
+                personalized_verdict=f"Barcode {barcode_digits} not found in online database. Tip: Switch to 'Food Label' mode and take a photo of the ingredients list or nutrition table.",
                 ocr_text=ocr_text,
                 barcode=barcode_digits
             )
@@ -443,16 +443,23 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
             pred_score -= 6
             pred_nova = max(pred_nova, 3)
 
-    final_health_score = int(max(5, min(99, round(pred_score))))
-    final_nova = int(max(1, min(4, pred_nova)))
-
-    # 6. Extract Genuine Nutrition Breakdown Strictly from Scanned Label
-    nutrition = _estimate_nutrition(ocr_text, cleaned_text, final_nova, final_health_score)
     catalog_match = _find_catalog_match(ocr_text)
+    if catalog_match and catalog_match.get("health_score"):
+        final_health_score = int(catalog_match["health_score"])
+    else:
+        final_health_score = int(max(5, min(99, round(pred_score))))
+
+    if catalog_match and catalog_match.get("nova_group"):
+        final_nova = int(catalog_match["nova_group"])
+    else:
+        final_nova = int(max(1, min(4, pred_nova)))
+
+    # 6. Extract Genuine Nutrition Breakdown from Scanned Label or Verified FMCG Database
+    nutrition = _estimate_nutrition(ocr_text, cleaned_text, final_nova, final_health_score, catalog_match=catalog_match)
     product_name = _extract_smart_product_name(ocr_text, catalog_match)
     brand_name = catalog_match.get("brand") if catalog_match else None
     category_name = catalog_match.get("category") if catalog_match else None
-    data_source = "Scanned Product Label"
+    data_source = "NutriLens Verified FMCG Catalog" if (catalog_match and not nutrition.is_estimated) else "Scanned Product Label"
     data_completeness, missing_nutrients = nutrition_service.assess_data_completeness({
         "calories": nutrition.calories,
         "protein_g": nutrition.protein_g,
@@ -601,20 +608,62 @@ def _find_catalog_match(text: str) -> Optional[Dict[str, Any]]:
         if best_item:
             return best_item
 
-    # 2. Check SQLite food_catalog in nutrilens.db
+    # 2. Check SQLite food_catalog in nutrilens.db (40,000+ items + FMCG verified foods)
     try:
         import sqlite3
         db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "nutrilens.db")
         if os.path.exists(db_path):
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
-            for tl in title_lines:
-                clean_term = re.sub(r'^[^\w]+|[^\w]+$', '', tl).strip()
-                if len(clean_term) >= 4 and len(clean_term) <= 40:
-                    cur.execute(
-                        "SELECT food_name, brand, category, nova_group, health_score FROM food_catalog WHERE food_name LIKE ? OR brand LIKE ? LIMIT 1",
-                        (f"%{clean_term}%", f"%{clean_term}%")
-                    )
+
+            # First priority: check if any iconic brand pattern matches in entire text
+            text_lower = text.lower()
+            
+            BRAND_MAP = [
+                (r"good day.*?butter|good day", "Britannia Good Day Butter Cookies"),
+                (r"good day.*?cashew", "Britannia Good Day Cashew Cookies"),
+                (r"good day.*?pista", "Britannia Good Day Pista Badam Cookies"),
+                (r"bourbon", "Britannia Bourbon Chocolate Cream Biscuits"),
+                (r"marie gold", "Britannia Marie Gold Biscuits"),
+                (r"parle[- ]?g|parleg", "Parle-G Original Gluco Biscuits"),
+                (r"monaco", "Parle Monaco Salted Crackers"),
+                (r"hide.*?seek", "Parle Hide & Seek Chocolate Chip Cookies"),
+                (r"maggi.*?masala|maggi", "Maggi 2-Minute Masala Noodles"),
+                (r"kitkat|kit kat", "Nestlé KitKat 4-Finger Wafer Bar"),
+                (r"lay'?s.*?magic masala", "Lay's India's Magic Masala Potato Chips"),
+                (r"lay'?s.*?cream|lay'?s.*?onion", "Lay's American Style Cream & Onion Potato Chips"),
+                (r"lay'?s.*?classic|lay'?s.*?salted|lay'?s|lays", "Lay's Classic Salted Potato Chips"),
+                (r"kurkure", "Kurkure Masala Munch"),
+                (r"aloo bhujia", "Haldiram's Nagpur Aloo Bhujia"),
+                (r"bhujia sev|bhujia", "Haldiram's Bhujia Sev"),
+                (r"dairy milk.*?silk", "Cadbury Dairy Milk Silk Chocolate"),
+                (r"dairy milk", "Cadbury Dairy Milk Chocolate"),
+                (r"oreo", "Oreo Original Vanilla Creme Cookies"),
+                (r"amul.*?butter", "Amul Pasteurized Salted Butter"),
+                (r"amul.*?ghee", "Amul Pure Cow Ghee"),
+                (r"amul.*?cheese", "Amul Processed Cheese Blocks / Slices"),
+                (r"amul.*?milk|taaza", "Amul Taaza Homogenised Toned Milk"),
+                (r"dark fantasy", "Sunfeast Dark Fantasy Choco Fills Cookies"),
+                (r"coca[- ]?cola|coke", "Coca-Cola Original Taste"),
+                (r"thums up", "Thums Up Charged Cola"),
+                (r"sprite", "Sprite Lemon-Lime Carbonated Drink"),
+                (r"frooti", "Frooti Real Mango Drink"),
+                (r"red bull", "Red Bull Energy Drink"),
+                (r"quaker.*?oats|rolled oats", "Quaker Rolled Oats Whole Grain"),
+                (r"corn flakes", "Kellogg's Corn Flakes Original"),
+                (r"aashirvaad|atta", "Aashirvaad Shudh Chakki Atta"),
+                (r"tata salt", "Tata Salt Vacuum Evaporated Iodized Salt")
+            ]
+
+            full_cols = """
+                SELECT food_name, brand, category, nova_group, health_score,
+                       calories, protein_g, fat_g, carbs_g, sugar_g, fiber_g, sodium_mg, ingredients_text
+                FROM food_catalog
+            """
+
+            for pattern, canonical_name in BRAND_MAP:
+                if re.search(pattern, text_lower):
+                    cur.execute(f"{full_cols} WHERE food_name = ? LIMIT 1", (canonical_name,))
                     row = cur.fetchone()
                     if row:
                         conn.close()
@@ -622,12 +671,63 @@ def _find_catalog_match(text: str) -> Optional[Dict[str, Any]]:
                             "food_name": row[0],
                             "brand": row[1],
                             "category": row[2],
-                            "nova_group": row[3],
-                            "health_score": row[4]
+                            "nova_group": int(row[3]) if row[3] is not None else 3,
+                            "health_score": int(row[4]) if row[4] is not None else 70,
+                            "calories": float(row[5]) if row[5] is not None else None,
+                            "protein_g": float(row[6]) if row[6] is not None else None,
+                            "fat_g": float(row[7]) if row[7] is not None else None,
+                            "carbs_g": float(row[8]) if row[8] is not None else None,
+                            "sugar_g": float(row[9]) if row[9] is not None else None,
+                            "fiber_g": float(row[10]) if row[10] is not None else None,
+                            "sodium_mg": float(row[11]) if row[11] is not None else None,
+                            "ingredients_text": row[12] if row[12] else None
                         }
+
+            candidate_terms = []
+            for pattern, clean_title in KNOWN_FOOD_BRANDS:
+                if re.search(r'\b' + pattern + r'\b', text_lower) or re.search(pattern, text_lower):
+                    candidate_terms.append(clean_title)
+
+            # Second priority: title lines extracted from top of package
+            for tl in title_lines:
+                clean_tl = re.sub(r'\b\d+\s*(g|gm|gms|kg|ml|l|oz|lb|pcs|pack)\b', '', tl, flags=re.I)
+                clean_tl = re.sub(r'^[^\w]+|[^\w]+$', '', clean_tl).strip()
+                if len(clean_tl) >= 4 and len(clean_tl) <= 50 and clean_tl not in candidate_terms:
+                    candidate_terms.append(clean_tl)
+
+            sql = """
+                SELECT food_name, brand, category, nova_group, health_score,
+                       calories, protein_g, fat_g, carbs_g, sugar_g, fiber_g, sodium_mg, ingredients_text
+                FROM food_catalog
+                WHERE food_name LIKE ? OR brand LIKE ?
+                ORDER BY CASE WHEN food_name LIKE ? THEN 1 ELSE 2 END
+                LIMIT 1
+            """
+
+            for term in candidate_terms:
+                cur.execute(sql, (f"%{term}%", f"%{term}%", f"%{term}%"))
+                row = cur.fetchone()
+                if row:
+                    conn.close()
+                    return {
+                        "food_name": row[0],
+                        "brand": row[1],
+                        "category": row[2],
+                        "nova_group": int(row[3]) if row[3] is not None else 3,
+                        "health_score": int(row[4]) if row[4] is not None else 70,
+                        "calories": float(row[5]) if row[5] is not None else None,
+                        "protein_g": float(row[6]) if row[6] is not None else None,
+                        "fat_g": float(row[7]) if row[7] is not None else None,
+                        "carbs_g": float(row[8]) if row[8] is not None else None,
+                        "sugar_g": float(row[9]) if row[9] is not None else None,
+                        "fiber_g": float(row[10]) if row[10] is not None else None,
+                        "sodium_mg": float(row[11]) if row[11] is not None else None,
+                        "ingredients_text": row[12] if row[12] else None
+                    }
+
             conn.close()
-    except Exception:
-        pass
+    except Exception as err:
+        print(f"Catalog match error: {err}")
 
     return None
 
@@ -1019,10 +1119,11 @@ def _estimate_from_ingredients(text: str, nova: int, score: int) -> NutritionBre
     )
 
 
-def _estimate_nutrition(ocr_text: str, cleaned_text: str, nova: int, score: int) -> NutritionBreakdown:
+def _estimate_nutrition(ocr_text: str, cleaned_text: str, nova: int, score: int, catalog_match: Optional[Dict[str, Any]] = None) -> NutritionBreakdown:
     """
     Extracts genuine nutrition facts from scanned label text.
-    If no printed nutrition panel exists, derives a dynamic estimate from ingredient tokens.
+    If no printed nutrition panel exists on packaging (e.g. front photo), uses verified FMCG catalog values.
+    Otherwise derives dynamic estimate from ingredient tokens.
     Never injects fake static numbers.
     """
     # 1. First attempt: Parse genuine nutrition figures from OCR text
@@ -1057,7 +1158,22 @@ def _estimate_nutrition(ocr_text: str, cleaned_text: str, nova: int, score: int)
             serving_size=parsed.get("serving_size")
         )
 
-    # 2. No label nutrition table found -> compute dynamic ingredient-derived estimate
+    # 2. Second attempt: Check if matched against verified product catalog in SQLite database
+    if catalog_match and (catalog_match.get("calories") is not None or catalog_match.get("carbs_g") is not None):
+        return NutritionBreakdown(
+            calories=catalog_match.get("calories"),
+            protein_g=catalog_match.get("protein_g"),
+            carbs_g=catalog_match.get("carbs_g"),
+            fat_g=catalog_match.get("fat_g"),
+            sugar_g=catalog_match.get("sugar_g"),
+            sodium_mg=catalog_match.get("sodium_mg"),
+            fiber_g=catalog_match.get("fiber_g"),
+            is_estimated=False,
+            source="NutriLens Verified Food Catalog",
+            serving_size=catalog_match.get("serving_size")
+        )
+
+    # 3. No label nutrition table found & not in catalog -> compute dynamic ingredient-derived estimate
     return _estimate_from_ingredients(f"{ocr_text} {cleaned_text}", nova, score)
 
 
@@ -1129,69 +1245,90 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             scale = 800.0 / img.width
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
 
-        # 3. Create multiple enhanced variants for OCR passes
-        img_variants = []
+        # 3. Create multiple enhanced variants for OCR passes (including mirrored orientations for webcams)
+        from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS
 
-        # Variant A: Original image
-        img_variants.append(img)
+        def _clean_ocr_tokens(raw_t: str) -> str:
+            if not raw_t:
+                return ""
+            # Separate adjacent merged words on stylized food packaging
+            clean = re.sub(r'([a-zA-Z]{3,})(cookies|biscuits|noodles|chips|cola|chocolate|namkeen|milk|butter|wafer|sugar|wheat|flour|salt|fat|crisp|snack)', r'\1 \2', raw_t, flags=re.I)
+            clean = re.sub(r'(\b\w+\b)\s+Product\b', r'\1', clean, flags=re.I)
+            return clean.strip()
 
-        # Variant B: High contrast + sharpened
+        def _score_text(t: str) -> int:
+            if not t:
+                return 0
+            tl = t.lower()
+            food_count = sum(1 for w in FOOD_INGREDIENT_TOKENS if w in tl)
+            nutri_count = sum(1 for w in NUTRITION_FACTS_TERMS if w in tl)
+            return food_count * 20 + nutri_count * 12 + len(t.split())
+
+        img_mirrored = ImageOps.mirror(img)
+
+        img_variants = [
+            ("original", img),
+            ("mirrored", img_mirrored),
+        ]
+
         try:
-            enhanced = ImageEnhance.Contrast(img).enhance(1.8)
-            enhanced = ImageEnhance.Sharpness(enhanced).enhance(2.0)
-            img_variants.append(enhanced)
+            enhanced = ImageEnhance.Contrast(img).enhance(1.9)
+            enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.8)
+            img_variants.append(("contrast", enhanced))
+            img_variants.append(("contrast_mirrored", ImageOps.mirror(enhanced)))
         except Exception:
             pass
 
-        # Variant C: Grayscale + high contrast (best for printed labels)
         try:
             gray = img.convert("L")
             gray = ImageEnhance.Contrast(gray).enhance(2.2)
-            gray = ImageEnhance.Sharpness(gray).enhance(1.5)
-            img_variants.append(gray)
+            img_variants.append(("gray", gray))
+            img_variants.append(("gray_mirrored", ImageOps.mirror(gray)))
         except Exception:
             pass
 
         # 4. Engine 1: RapidOCR (Primary - Pure ONNX, fast, highly accurate)
         best_text = ""
-        best_word_count = 0
+        best_score = 0
 
         ocr_engine = get_rapidocr_engine()
         if ocr_engine is not None:
-            for variant in img_variants:
+            for tag, variant in img_variants:
                 try:
                     img_array = np.array(variant.convert("RGB") if variant.mode == "L" else variant)
                     result, _ = ocr_engine(img_array)
                     if result:
                         lines = [str(item[1]).strip() for item in result if item and len(item) > 1 and item[1]]
                         text = "\n".join(lines).strip()
-                        word_count = len(text.split())
-                        if word_count > best_word_count:
+                        text = _clean_ocr_tokens(text)
+                        score = _score_text(text)
+                        if score > best_score:
                             best_text = text
-                            best_word_count = word_count
-                        # Early exit: if first variant already extracted enough text, skip rest
-                        if best_word_count >= 5:
-                            break
+                            best_score = score
+                            # Fast exit if we already have strong food and nutrition matches
+                            if score >= 35:
+                                break
                 except Exception:
                     continue
 
-            # Try 90° rotation if initial results are poor (handles sideways labels)
-            if best_word_count < 3:
-                for angle in [90, 270, 180]:
-                    try:
-                        rotated = img.rotate(angle, expand=True)
-                        result, _ = ocr_engine(np.array(rotated))
-                        if result:
-                            lines = [str(item[1]).strip() for item in result if item and len(item) > 1 and item[1]]
-                            text = "\n".join(lines).strip()
-                            word_count = len(text.split())
-                            if word_count > best_word_count:
-                                best_text = text
-                                best_word_count = word_count
-                    except Exception:
-                        continue
+            # Try 90° and 270° rotations if initial score is low
+            if best_score < 10:
+                for angle in [90, 270]:
+                    for base_v in [img, img_mirrored]:
+                        try:
+                            rotated = base_v.rotate(angle, expand=True)
+                            result, _ = ocr_engine(np.array(rotated))
+                            if result:
+                                lines = [str(item[1]).strip() for item in result if item and len(item) > 1 and item[1]]
+                                text = _clean_ocr_tokens("\n".join(lines).strip())
+                                score = _score_text(text)
+                                if score > best_score:
+                                    best_text = text
+                                    best_score = score
+                        except Exception:
+                            continue
 
-            if best_text and best_word_count >= 1:
+            if best_text and len(best_text.split()) >= 1:
                 return best_text
 
         # 5. Engine 2: Windows native WinRT OCR (Windows only fallback)
@@ -1199,25 +1336,31 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             try:
                 import winocr
                 import asyncio
+                import concurrent.futures
 
-                async def _run_winocr(target_img):
-                    res = await winocr.recognize_pil(target_img, "en")
-                    return res.text.strip() if hasattr(res, "text") and res.text else ""
+                def _run_winocr_sync(target_img):
+                    try:
+                        async def _do():
+                            res = await winocr.recognize_pil(target_img, "en")
+                            return res.text.strip() if hasattr(res, "text") and res.text else ""
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            return loop.run_until_complete(_do())
+                        finally:
+                            loop.close()
+                    except Exception:
+                        return ""
 
-                # Create a fresh event loop for winocr to avoid conflict with FastAPI's loop
-                try:
-                    loop = asyncio.new_event_loop()
-                    win_text = loop.run_until_complete(_run_winocr(img))
-                    loop.close()
-                except RuntimeError:
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        new_loop = asyncio.new_event_loop()
-                        win_text = pool.submit(new_loop.run_until_complete, _run_winocr(img)).result(timeout=6.0)
-                        new_loop.close()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    win_text = pool.submit(_run_winocr_sync, img).result(timeout=4.0)
+                    if not win_text or len(win_text.split()) < 2:
+                        win_mirrored = pool.submit(_run_winocr_sync, img_mirrored).result(timeout=4.0)
+                        if win_mirrored and len(win_mirrored.split()) > len(win_text.split()):
+                            win_text = win_mirrored
 
                 if win_text and len(win_text.split()) >= 1:
-                    return win_text
+                    return _clean_ocr_tokens(win_text)
             except Exception:
                 pass
 
@@ -1225,8 +1368,12 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         try:
             import pytesseract
             tess_text = pytesseract.image_to_string(img).strip()
+            if not tess_text or len(tess_text.split()) < 2:
+                tess_text_mirrored = pytesseract.image_to_string(img_mirrored).strip()
+                if tess_text_mirrored and len(tess_text_mirrored.split()) > len(tess_text.split()):
+                    tess_text = tess_text_mirrored
             if tess_text and len(tess_text.split()) >= 1:
-                return tess_text
+                return _clean_ocr_tokens(tess_text)
         except Exception:
             pass
 
@@ -1284,9 +1431,12 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
         text_lower = extracted_text.lower()
         word_count = len(extracted_text.split())
 
-        # Check if ANY food-related tokens exist in the sparse text
+        # Check if matched in product catalog or iconic brand map
+        catalog_match = _find_catalog_match(extracted_text)
+
+        # Check if ANY food-related tokens exist in the sparse text (supports substrings)
         from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS
-        food_hits = [w for w in FOOD_INGREDIENT_TOKENS if re.search(r'\b' + re.escape(w) + r'\b', text_lower)]
+        food_hits = [w for w in FOOD_INGREDIENT_TOKENS if re.search(r'\b' + re.escape(w) + r'\b', text_lower) or (len(w) >= 4 and w in text_lower)]
         nutrition_hits = [t for t in NUTRITION_FACTS_TERMS if t in text_lower]
 
         # Also check for common food packaging patterns
@@ -1295,7 +1445,8 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
         has_percent = bool(re.search(r'\d+\s*%', text_lower))
 
         is_likely_food = (
-            len(food_hits) >= 1
+            catalog_match is not None
+            or len(food_hits) >= 1
             or len(nutrition_hits) >= 1
             or has_kcal
             or (has_weight and word_count >= 2)
@@ -1319,11 +1470,19 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
                 except Exception:
                     pass
 
-            catalog_match = _find_catalog_match(extracted_text)
+            catalog_match = catalog_match or _find_catalog_match(extracted_text)
+            if catalog_match and catalog_match.get("health_score"):
+                final_score = int(catalog_match["health_score"])
+            else:
+                final_score = int(max(5, min(99, round(pred_score))))
+
+            if catalog_match and catalog_match.get("nova_group"):
+                final_nova = int(catalog_match["nova_group"])
+            else:
+                final_nova = int(max(1, min(4, pred_nova)))
+
             product_name = _extract_smart_product_name(extracted_text, catalog_match)
-            nutrition = _estimate_nutrition(extracted_text, cleaned_text, pred_nova, int(pred_score))
-            final_score = int(max(5, min(99, round(pred_score))))
-            final_nova = int(max(1, min(4, pred_nova)))
+            nutrition = _estimate_nutrition(extracted_text, cleaned_text, final_nova, final_score, catalog_match=catalog_match)
 
             detected_allergens = []
             for allergen, keywords in ALLERGEN_TAXONOMY.items():

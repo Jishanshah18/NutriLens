@@ -72,16 +72,21 @@ def decode_barcode_from_image(image_base64: str) -> Optional[str]:
                 pass
             return None
 
-        # Pass 1: standard image
+        # Pass 1: standard image and mirrored image (laptop webcams stream mirrored video)
         code = _try_zxing(img)
         if code:
             return code
 
-        # Pass 2: Grayscale and contrast enhanced
+        img_mirrored = ImageOps.mirror(img)
+        code = _try_zxing(img_mirrored)
+        if code:
+            return code
+
+        # Pass 2: Grayscale and contrast enhanced (both standard and mirrored)
         try:
             gray = img.convert("L")
             enh = ImageEnhance.Contrast(gray).enhance(2.0)
-            code = _try_zxing(enh)
+            code = _try_zxing(enh) or _try_zxing(ImageOps.mirror(enh))
             if code:
                 return code
         except Exception:
@@ -91,7 +96,7 @@ def decode_barcode_from_image(image_base64: str) -> Optional[str]:
         for angle in (90, 180, 270):
             try:
                 rotated = img.rotate(angle, expand=True)
-                code = _try_zxing(rotated)
+                code = _try_zxing(rotated) or _try_zxing(ImageOps.mirror(rotated))
                 if code:
                     return code
             except Exception:

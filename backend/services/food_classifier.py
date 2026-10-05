@@ -157,11 +157,12 @@ def classify_food_item(text: str) -> Tuple[bool, str, Dict[str, Any]]:
     text_lower = text.lower()
     words = set(re.findall(r'[a-zA-Z]{3,}', text_lower))
 
-    # 1. Match Food Indicators
+    # 1. Match Food Indicators (supports boundary matches and substring matches for merged OCR tokens)
     food_matches = []
     for food_word in FOOD_INGREDIENT_TOKENS:
-        # Check boundary match
         if re.search(r'\b' + re.escape(food_word) + r'\b', text_lower):
+            food_matches.append(food_word)
+        elif len(food_word) >= 4 and food_word in text_lower:
             food_matches.append(food_word)
 
     # 2. Match Nutrition Facts Terminology

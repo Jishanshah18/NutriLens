@@ -66,8 +66,8 @@ export default function ScannerScreen() {
   const webVideoRef = useRef<any>(null);
   const webStreamRef = useRef<any>(null);
 
-  // Live Auto-Detection States (Enabled by default for hands-free live scanning)
-  const [isLiveAutoDetect, setIsLiveAutoDetect] = useState(true);
+  // Live Auto-Detection States (Tap badge to enable hands-free live scanning)
+  const [isLiveAutoDetect, setIsLiveAutoDetect] = useState(false);
   const [autoDetectProgress, setAutoDetectProgress] = useState(0);
   const liveScanCooldownRef = useRef(false);
 
@@ -420,7 +420,7 @@ export default function ScannerScreen() {
         const ctx = canvas.getContext("2d");
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
           capturedBase64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
           setSelectedImageUri(dataUrl);
           stopCamera();
@@ -597,9 +597,9 @@ export default function ScannerScreen() {
     }
   };
 
-  // Barcode detection & online lookup
+  // Barcode detection & food product name lookup
   const handleBarcodeDetected = async (barcode: string) => {
-    const cleanCode = barcode.trim().replace(/\s+/g, "");
+    const cleanCode = barcode.trim();
     if (!cleanCode || isBarcodeLoading) return;
 
     setIsBarcodeLoading(true);
@@ -608,7 +608,19 @@ export default function ScannerScreen() {
     setSimulationStageIndex(2);
 
     try {
-      const response = await lookupBarcode(cleanCode, profile.user_id);
+      const pureDigits = cleanCode.replace(/\D/g, "");
+      const isBarcode = pureDigits.length >= 8 && /^[0-9\s\-:]+$/.test(cleanCode);
+
+      let response: AnalyzeResponse;
+      if (isBarcode) {
+        response = await lookupBarcode(pureDigits, profile.user_id);
+      } else {
+        // Direct food name / product title lookup (e.g. "Good Day", "Maggi", "Kurkure", "Lays")
+        response = await analyzeLabel({
+          ocr_text: cleanCode,
+          user_profile: profile
+        });
+      }
 
       if (response && response.is_food) {
         setSimulationStageIndex(4);
@@ -624,19 +636,20 @@ export default function ScannerScreen() {
         return;
       }
 
-      // Genuine feedback: barcode not found in database
+      // Feedback: barcode or food not found in catalog
       setIsBarcodeLoading(false);
       setScanStage("IDLE");
       setScanError(
         response?.rejection_reason ||
-        `Barcode "${cleanCode}" was not found in our food database. Please switch to "Food Label" mode and capture the nutrition facts or ingredients directly.`
+        response?.personalized_verdict ||
+        `Product "${cleanCode}" was not found in our verified food catalog. Please switch to "Food Label" mode and capture the nutrition facts or ingredient label directly.`
       );
     } catch (err: any) {
-      console.warn("Barcode lookup error:", err);
+      console.warn("Product lookup error:", err);
       setIsBarcodeLoading(false);
       setScanStage("IDLE");
       setScanError(
-        `Unable to find product for barcode "${cleanCode}". Please verify the number or take a clear photo of the nutrition label.`
+        `Unable to find product details for "${cleanCode}". Please verify the name or take a clear photo of the food label.`
       );
     }
   };
@@ -672,7 +685,7 @@ export default function ScannerScreen() {
           const ctx = canvas.getContext("2d");
           if (ctx) {
             ctx.drawImage(video, 0, 0, targetW, targetH);
-            const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
             const b64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
             if (b64) {
               handleBarcodeImageUpload(b64, dataUrl);
@@ -1390,15 +1403,16 @@ export default function ScannerScreen() {
                 gap: 10
               }}>
                 <Text style={{ color: "#F8FAFC", fontSize: 12, fontWeight: "800" }}>
-                  Enter Product Barcode (EAN / UPC / GTIN):
+                  Enter Product Barcode or Food Name:
                 </Text>
                 <View style={{ flexDirection: "row", gap: 10 }}>
                   <TextInput
                     value={barcodeInput}
                     onChangeText={setBarcodeInput}
-                    placeholder="e.g. 3017620422003"
+                    placeholder="e.g. 8901063012843 or 'Good Day Cookies'"
                     placeholderTextColor="#64748B"
-                    keyboardType="numeric"
+                    keyboardType="default"
+                    autoCapitalize="words"
                     style={{
                       flex: 1,
                       backgroundColor: "rgba(255, 255, 255, 0.08)",
