@@ -75,7 +75,7 @@ async def root():
     return {
         "status": "online",
         "app": "NutriLens API",
-        "version": "2.2.0-ocr-headless-fixed",
+        "version": "2.3.0-headless-wheel-fixed",
         "docs_url": "/docs"
     }
 

@@ -17,7 +17,9 @@ lib64/
 parts/
 sdist/
 var/
-wheels/
+# wheels/
+!backend/wheels/
+!wheels/
 *.egg-info/
 .installed.cfg
 *.egg
