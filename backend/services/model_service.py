@@ -1066,13 +1066,80 @@ def get_last_ocr_debug() -> str:
     return _last_ocr_debug
 
 
+def ensure_headless_opencv() -> bool:
+    """
+    On headless cloud Linux environments (like Render/Docker), standard opencv-python
+    fails with 'libGL.so.1: cannot open shared object file: No such file or directory'.
+    This self-heals by replacing opencv-python with opencv-python-headless without GUI deps.
+    """
+    global _last_ocr_debug
+    try:
+        import cv2
+        return True
+    except (ImportError, Exception) as e:
+        err_str = str(e)
+        if "libGL" in err_str or "libgl" in err_str.lower():
+            print("Detected missing libGL in cloud environment. Auto-recovering using opencv-python-headless...")
+            try:
+                import sys, subprocess
+                subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python"], capture_output=True, text=True, check=False)
+                subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--force-reinstall", "opencv-python-headless"], capture_output=True, text=True, check=False)
+                if "cv2" in sys.modules:
+                    del sys.modules["cv2"]
+                import cv2
+                print("Successfully repaired OpenCV with opencv-python-headless.")
+                return True
+            except Exception as repair_err:
+                _last_ocr_debug = f"cv2 auto-repair failed: {repair_err}"
+                print(_last_ocr_debug)
+                return False
+        _last_ocr_debug = f"cv2 import failed: {e}"
+        return False
+
+
+def get_rapidocr_engine():
+    """
+    Retrieves or initializes the cached RapidOCR engine, ensuring headless OpenCV compatibility.
+    """
+    global _rapidocr_engine, _last_ocr_debug
+    if _rapidocr_engine is not None:
+        return _rapidocr_engine
+
+    ensure_headless_opencv()
+
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+        _rapidocr_engine = RapidOCR()
+        return _rapidocr_engine
+    except ImportError as imp_err:
+        err_msg = str(imp_err)
+        if "libGL" in err_msg or "libgl" in err_msg.lower():
+            print("RapidOCR import failed on libGL. Attempting immediate headless recovery...")
+            if ensure_headless_opencv():
+                try:
+                    from rapidocr_onnxruntime import RapidOCR
+                    _rapidocr_engine = RapidOCR()
+                    return _rapidocr_engine
+                except Exception as rec_err:
+                    _last_ocr_debug = f"RapidOCR post-recovery failed: {rec_err}"
+                    print(_last_ocr_debug)
+                    return None
+        _last_ocr_debug = f"RapidOCR ImportError: {imp_err}"
+        print(_last_ocr_debug)
+        return None
+    except Exception as rapid_err:
+        _last_ocr_debug = f"RapidOCR init error: {rapid_err}"
+        print(_last_ocr_debug)
+        return None
+
+
 def extract_text_from_image_base64(image_base64: str) -> str:
     """
     Extracts text from a base64 encoded image using high-speed local OCR.
     Uses RapidOCR (ONNX) as primary engine with enhanced preprocessing
     and multi-orientation passes for maximum text extraction from real-world photos.
     """
-    global _last_ocr_debug, _rapidocr_engine
+    global _last_ocr_debug
     if not image_base64:
         return ""
 
@@ -1130,12 +1197,8 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         best_text = ""
         best_word_count = 0
 
-        try:
-            from rapidocr_onnxruntime import RapidOCR
-            if _rapidocr_engine is None:
-                _rapidocr_engine = RapidOCR()
-            ocr_engine = _rapidocr_engine
-
+        ocr_engine = get_rapidocr_engine()
+        if ocr_engine is not None:
             for variant in img_variants:
                 try:
                     img_array = np.array(variant.convert("RGB") if variant.mode == "L" else variant)
@@ -1171,12 +1234,6 @@ def extract_text_from_image_base64(image_base64: str) -> str:
 
             if best_text and best_word_count >= 1:
                 return best_text
-        except ImportError as imp_err:
-            _last_ocr_debug = f"RapidOCR ImportError: {imp_err}"
-            print(f"RapidOCR ImportError: {imp_err}")
-        except Exception as rapid_err:
-            _last_ocr_debug = f"RapidOCR error: {rapid_err}"
-            print(f"RapidOCR error: {rapid_err}")
 
         # 5. Engine 2: Windows native WinRT OCR (Windows only fallback)
         if os.name == 'nt':

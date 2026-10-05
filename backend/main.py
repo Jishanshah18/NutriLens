@@ -38,6 +38,15 @@ app = FastAPI(
 async def startup_event():
     load_models()
     try:
+        from services.model_service import get_rapidocr_engine
+        engine = get_rapidocr_engine()
+        if engine:
+            print("RapidOCR engine warmed up successfully.")
+        else:
+            print("Notice: RapidOCR engine warmup pending.")
+    except Exception as e:
+        print(f"Notice during OCR warmup: {e}")
+    try:
         from services.nutrition_service import init_food_catalog
         init_food_catalog()
     except Exception as e:
@@ -66,7 +75,7 @@ async def root():
     return {
         "status": "online",
         "app": "NutriLens API",
-        "version": "2.1.0-render-parity",
+        "version": "2.2.0-ocr-headless-fixed",
         "docs_url": "/docs"
     }
 
