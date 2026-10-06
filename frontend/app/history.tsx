@@ -13,6 +13,18 @@ export default function HistoryScreen() {
   const { colors } = useTheme();
   const { userId, isAuthenticated } = useAuth();
 
+  const handleSafeBack = () => {
+    try {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace("/");
+      }
+    } catch {
+      router.replace("/");
+    }
+  };
+
   const [history, setHistory] = useState<ScanHistoryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
@@ -82,7 +94,7 @@ export default function HistoryScreen() {
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <TouchableOpacity
-              onPress={() => router.back()}
+              onPress={handleSafeBack}
               style={{
                 width: 36,
                 height: 36,

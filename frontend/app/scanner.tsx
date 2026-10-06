@@ -42,6 +42,18 @@ export default function ScannerScreen() {
   const params = useLocalSearchParams();
   const { colors } = useTheme();
 
+  const handleSafeBack = () => {
+    try {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace("/");
+      }
+    } catch {
+      router.replace("/");
+    }
+  };
+
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [flashOn, setFlashOn] = useState(false);
@@ -744,7 +756,7 @@ export default function ScannerScreen() {
         zIndex: 20
       }}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={handleSafeBack}
           style={{
             width: 40,
             height: 40,

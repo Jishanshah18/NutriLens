@@ -21,6 +21,18 @@ export default function ResultsScreen() {
   const params = useLocalSearchParams();
   const { colors, isDark } = useTheme();
 
+  const handleSafeBack = () => {
+    try {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.push("/scanner");
+      }
+    } catch {
+      router.push("/scanner");
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<TabType>("nutrition");
   const [data, setData] = useState<AnalyzeResponse | null>(null);
 
@@ -58,7 +70,7 @@ export default function ResultsScreen() {
           borderBottomColor: colors.border
         }}>
           <TouchableOpacity
-            onPress={() => router.push("/scanner")}
+            onPress={handleSafeBack}
             style={{
               width: 40,
               height: 40,
@@ -247,7 +259,7 @@ export default function ResultsScreen() {
         borderBottomColor: colors.border
       }}>
         <TouchableOpacity
-          onPress={() => router.push("/scanner")}
+          onPress={handleSafeBack}
           style={{
             width: 40,
             height: 40,
