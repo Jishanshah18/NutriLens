@@ -101,11 +101,33 @@ async def analyze_label_image_file_endpoint(
         )
 
     try:
-        image_b64 = base64.b64encode(contents).decode("utf-8")
+        from PIL import Image, ImageOps
+        import io, gc
+
+        # Memory optimization: resize huge raw packaging photos to 960px before base64 encoding
+        try:
+            with Image.open(io.BytesIO(contents)) as pil_img:
+                pil_img = ImageOps.exif_transpose(pil_img)
+                max_d = max(pil_img.width, pil_img.height)
+                if max_d > 960:
+                    scale = 960.0 / max_d
+                    pil_img = pil_img.resize((int(pil_img.width * scale), int(pil_img.height * scale)), Image.Resampling.BILINEAR)
+                buf = io.BytesIO()
+                pil_img.convert("RGB").save(buf, format="JPEG", quality=85, optimize=True)
+                image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                del buf
+        except Exception:
+            image_b64 = base64.b64encode(contents).decode("utf-8")
+
+        del contents
+        gc.collect()
+
         from services.user_service import get_user_profile
         profile = get_user_profile(user_id) if user_id and user_id != "guest" else None
 
         response = analyze_label_image(image_b64, profile)
+        del image_b64
+        gc.collect()
 
         # Save valid food scans to history
         if response.is_food and user_id and user_id not in ["guest", ""]:

@@ -138,6 +138,8 @@ def init_food_catalog():
                 records.clear()
 
         conn.commit()
+        import gc
+        gc.collect()
         print("Successfully loaded verified food items into SQLite catalog with low memory footprint.")
 
     conn.close()
@@ -238,10 +240,3 @@ def search_food(query: str, limit: int = 5) -> List[Dict[str, Any]]:
 
     conn.close()
     return results
-
-
-# Initialize catalog upon module import if needed
-try:
-    init_food_catalog()
-except Exception as _e:
-    print(f"Notice during food_catalog initialization: {_e}")

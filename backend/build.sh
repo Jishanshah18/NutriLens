@@ -14,4 +14,7 @@ echo "2. Verifying headless OpenCV and ONNX runtime..."
 python -c "import cv2; print('OpenCV successfully imported:', cv2.__version__)"
 python -c "from rapidocr_onnxruntime import RapidOCR; r = RapidOCR(); print('RapidOCR initialized successfully!')"
 
+echo "3. Pre-populating verified food catalog during build step..."
+python -c "from services.nutrition_service import init_food_catalog; init_food_catalog(); print('Catalog pre-built and indexed!')"
+
 echo "=== Build Complete ==="

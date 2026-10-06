@@ -89,8 +89,7 @@ def reload_models():
     load_models(force_reload=True)
 
 
-# Ensure models are loaded when service starts
-load_models()
+# Models are loaded either on app startup or lazily upon the first inference request
 
 
 def _audit_user_preferences(
@@ -214,6 +213,8 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
     Analyzes scanned text or barcode against food datasets, toxicological knowledge base,
     and user personal dietary preferences/allergies.
     """
+    if not _models.get("is_loaded"):
+        load_models()
     profile = user_profile or UserProfile()
 
     # 0. Check for Barcode format or GTIN query
@@ -1286,27 +1287,28 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         # 2. Quality check: evaluate brightness and blur metric
         np_check = np.array(img)
         mean_brightness = float(np.mean(np_check))
+        is_blank = (mean_brightness > 248.0 and float(np.std(np_check)) < 5.0)
+        del np_check  # Free array immediately
         _last_ocr_debug = ""
         if mean_brightness < 20.0:
             _last_ocr_debug = "dark_image: Mean brightness is very low (<20)"
-        elif mean_brightness > 248.0 and float(np.std(np_check)) < 5.0:
+        elif is_blank:
             _last_ocr_debug = "blank_image: Image is almost solid white"
 
-        # 3. Adaptive scaling: downscale huge photos (>1024px) for 3x OCR speed; upscale tiny photos (<700px)
+        # 3. Adaptive scaling: downscale photos (>960px) for 3x speed and minimal ONNX tensor memory
         max_dim = max(img.width, img.height)
-        if max_dim > 1024:
-            scale = 1024.0 / max_dim
-            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
-        elif img.width < 700 and img.width > 0:
-            scale = 700.0 / img.width
-            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
+        if max_dim > 960:
+            scale = 960.0 / max_dim
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.BILINEAR)
+        elif img.width < 650 and img.width > 0:
+            scale = 650.0 / img.width
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.BILINEAR)
 
         from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS
 
         def _clean_ocr_tokens(raw_t: str) -> str:
             if not raw_t:
                 return ""
-            # Separate adjacent merged words on stylized food packaging
             clean = re.sub(r'([a-zA-Z]{3,})(cookies|biscuits|noodles|chips|cola|chocolate|namkeen|milk|butter|wafer|sugar|wheat|flour|salt|fat|crisp|snack)', r'\1 \2', raw_t, flags=re.I)
             clean = re.sub(r'(\b\w+\b)\s+Product\b', r'\1', clean, flags=re.I)
             return clean.strip()
@@ -1326,6 +1328,7 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         ocr_engine = get_rapidocr_engine()
 
         def _run_engine(pil_image) -> Tuple[str, int]:
+            arr = None
             try:
                 arr = np.array(pil_image.convert("RGB") if pil_image.mode != "RGB" else pil_image)
                 res, _ = ocr_engine(arr)
@@ -1336,6 +1339,9 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                     return txt, sc
             except Exception:
                 pass
+            finally:
+                if arr is not None:
+                    del arr
             return "", 0
 
         if ocr_engine is not None:
@@ -1343,52 +1349,65 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             t1, s1 = _run_engine(img)
             if s1 > best_score:
                 best_text, best_score = t1, s1
-                # Early return if strong text extracted
-                if best_score >= 20 or len(best_text.split()) >= 15:
+                # Early return if strong text extracted (avoids 4 extra passes)
+                if best_score >= 14 or len(best_text.split()) >= 7:
+                    import gc; gc.collect()
                     return best_text
 
-            # Pass 2: Unsharp Mask for sharpening blurry or soft packaging text
+            # Pass 2: Unsharp Mask for sharpening blurry packaging text
             unsharp = img.filter(ImageFilter.UnsharpMask(radius=2.0, percent=180, threshold=2))
             t2, s2 = _run_engine(unsharp)
+            del unsharp
             if s2 > best_score:
                 best_text, best_score = t2, s2
-                if best_score >= 20:
+                if best_score >= 14:
+                    import gc; gc.collect()
                     return best_text
 
             # Pass 3: CLAHE adaptive contrast (uneven lighting, glossy wrappers)
             try:
                 gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
                 clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-                gray_clahe = Image.fromarray(clahe.apply(gray_cv))
+                clahe_arr = clahe.apply(gray_cv)
+                gray_clahe = Image.fromarray(clahe_arr)
+                del gray_cv, clahe, clahe_arr
                 t3, s3 = _run_engine(gray_clahe)
+                del gray_clahe
                 if s3 > best_score:
                     best_text, best_score = t3, s3
-                    if best_score >= 20:
+                    if best_score >= 14:
+                        import gc; gc.collect()
                         return best_text
             except Exception:
                 pass
 
-            # Pass 4: Inverted (white text on dark packaging e.g. Cadbury, Oreo, Coke)
-            if best_score < 12:
+            # Pass 4: Inverted (white text on dark packaging)
+            if best_score < 10:
                 try:
                     inverted = ImageOps.invert(img.convert("RGB"))
                     t4, s4 = _run_engine(inverted)
+                    del inverted
                     if s4 > best_score:
                         best_text, best_score = t4, s4
+                        if best_score >= 14:
+                            import gc; gc.collect()
+                            return best_text
                 except Exception:
                     pass
 
-            # Pass 5: 90° and 270° rotations ONLY if score is still very low (< 6)
-            if best_score < 6:
+            # Pass 5: 90° and 270° rotations ONLY if score is very low (< 5)
+            if best_score < 5:
                 for angle in (90, 270):
                     rotated = img.rotate(angle, expand=True)
                     tr, sr = _run_engine(rotated)
+                    del rotated
                     if sr > best_score:
                         best_text, best_score = tr, sr
-                        if best_score >= 15:
+                        if best_score >= 12:
                             break
 
             if best_text and len(best_text.split()) >= 1:
+                import gc; gc.collect()
                 return best_text
 
         # Engine 2: Windows WinOCR fallback
@@ -1432,6 +1451,7 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             except Exception:
                 pass
 
+        import gc; gc.collect()
         if best_text:
             return best_text
 
