@@ -25,10 +25,11 @@ def extract_barcode_digits(text: str) -> Optional[str]:
     return None
 
 
-def decode_barcode_from_image(image_base64: str) -> Optional[str]:
+def decode_barcode_from_image(image_base64: str, allow_ocr_fallback: bool = False) -> Optional[str]:
     """
     Decodes barcode numbers (EAN-13, EAN-8, UPC-A, UPC-E, Code 128, etc.) from base64 image data.
-    Uses zxing-cpp with adaptive preprocessing, rotation passes, and OCR digit fallback.
+    Uses zxing-cpp with adaptive preprocessing and rotation passes.
+    Optional OCR digit fallback is disabled by default to avoid duplicate OCR cycles during full label scans.
     """
     if not image_base64:
         return None
@@ -102,16 +103,16 @@ def decode_barcode_from_image(image_base64: str) -> Optional[str]:
             except Exception:
                 pass
 
-        # Pass 4: Fallback to OCR digit extraction
-        # Many barcode images have the digits printed beneath the bars
-        try:
-            from services.model_service import extract_text_from_image_base64
-            ocr_text = extract_text_from_image_base64(image_base64)
-            digits = extract_barcode_digits(ocr_text)
-            if digits:
-                return digits
-        except Exception:
-            pass
+        # Pass 4: Fallback to OCR digit extraction only when explicitly requested
+        if allow_ocr_fallback:
+            try:
+                from services.model_service import extract_text_from_image_base64
+                ocr_text = extract_text_from_image_base64(image_base64)
+                digits = extract_barcode_digits(ocr_text)
+                if digits:
+                    return digits
+            except Exception:
+                pass
 
     except Exception as e:
         print(f"Error in decode_barcode_from_image: {e}")

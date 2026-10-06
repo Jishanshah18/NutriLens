@@ -275,24 +275,37 @@ const FALLBACK_QUIZZES: QuizQuestion[] = [
   }
 ];
 
-// Candidate backend URLs in priority order:
-// 1. Explicit environment variable
-const isHttpsBrowser = typeof window !== "undefined" && window.location?.protocol === "https:";
+// Detect browser / dev environment
+const isBrowser = typeof window !== "undefined";
+const isHttpsBrowser = isBrowser && window.location?.protocol === "https:";
+const isLocalhostEnv = isBrowser && (
+  window.location?.hostname === "localhost" ||
+  window.location?.hostname === "127.0.0.1" ||
+  window.location?.hostname === "::1"
+);
 
 // Candidate backend URLs in priority order:
-// 1. Explicit environment variable (EXPO_PUBLIC_API_URL)
-// 2. Local machine backend (FastAPI on 8000 - only when on non-HTTPS dev)
-// 3. Fallback remote cloud backend (Render)
-const CANDIDATE_BASE_URLS: string[] = [
-  process.env.EXPO_PUBLIC_API_URL,
-  ...(isHttpsBrowser ? [] : ["http://127.0.0.1:8000/api", "http://localhost:8000/api"]),
-  "https://nutrilens-jfiv.onrender.com/api"
-].filter(Boolean) as string[];
+// In local development: local FastAPI server first, then cloud Render fallback.
+// In HTTPS production (Vercel): EXPO_PUBLIC_API_URL or cloud Render backend.
+const CANDIDATE_BASE_URLS: string[] = (
+  isHttpsBrowser
+    ? [
+        process.env.EXPO_PUBLIC_API_URL,
+        "https://nutrilens-jfiv.onrender.com/api"
+      ]
+    : [
+        "http://127.0.0.1:8000/api",
+        "http://localhost:8000/api",
+        process.env.EXPO_PUBLIC_API_URL,
+        "https://nutrilens-jfiv.onrender.com/api"
+      ]
+).filter(Boolean) as string[];
 
 let _cachedWorkingUrl: string | null = null;
 
 export const getApiBaseUrl = (): string => {
   if (_cachedWorkingUrl) return _cachedWorkingUrl;
+  if (!isHttpsBrowser && isLocalhostEnv) return "http://127.0.0.1:8000/api";
   if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
   if (isHttpsBrowser) return "https://nutrilens-jfiv.onrender.com/api";
   return "http://127.0.0.1:8000/api";
@@ -320,14 +333,18 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
   }
 
   let lastError: any = null;
+  const isImageOrScanEndpoint = (
+    cleanEndpoint.includes("analyze") ||
+    cleanEndpoint.includes("extract-ocr") ||
+    cleanEndpoint.includes("barcode")
+  );
 
   for (const baseUrl of urlsToTry) {
     try {
       const fullUrl = `${baseUrl}${cleanEndpoint}`;
       const controller = new AbortController();
-      const isLocal = baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost");
-      const defaultTimeout = options.method === "GET" ? 8000 : 35000;
-      const timeoutMs = isLocal ? 3000 : defaultTimeout;
+      // Allow up to 35s for heavy image OCR / ML classification; 8s for simple GET health checks
+      const timeoutMs = isImageOrScanEndpoint ? 35000 : (options.method === "GET" ? 8000 : 15000);
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(fullUrl, {

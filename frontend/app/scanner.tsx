@@ -512,10 +512,19 @@ export default function ScannerScreen() {
       finalResult = response;
 
       // Check if item was rejected as non-food or unreadable
-      if (finalResult.is_food === false || !finalResult.health_score) {
+      if (finalResult.is_food === false) {
         setScanStage("IDLE");
-        setScanError(finalResult.rejection_reason || finalResult.personalized_verdict || "Unable to read nutritional or ingredient data. Please ensure the label is clearly visible and well-lit.");
+        setScanError(
+          finalResult.rejection_reason ||
+          finalResult.personalized_verdict ||
+          "Unable to identify food packaging or read nutritional data. Please ensure the label is clearly visible and well-lit."
+        );
         return;
+      }
+
+      // Ensure valid health score fallback if unassigned
+      if (typeof finalResult.health_score !== "number" || isNaN(finalResult.health_score) || finalResult.health_score <= 0) {
+        finalResult.health_score = 50;
       }
 
       // Stage 5: RESULT
@@ -532,9 +541,21 @@ export default function ScannerScreen() {
     } catch (err: any) {
       console.warn("Scan analysis error:", err);
       setScanStage("IDLE");
-      setScanError(
-        err?.message || "Failed to analyze food packaging label. Please ensure the label is clearly visible and try scanning again."
-      );
+      const rawMsg = err?.message || "";
+      if (
+        rawMsg.includes("Failed to connect") ||
+        rawMsg.includes("Failed to fetch") ||
+        rawMsg.includes("Network") ||
+        rawMsg.includes("network")
+      ) {
+        setScanError(
+          "Backend connection failed. Please ensure the NutriLens server is running on http://127.0.0.1:8000."
+        );
+      } else {
+        setScanError(
+          rawMsg || "Unable to read nutritional or ingredient data clearly. Please hold camera 4-6 inches away, ensure bright lighting, and focus directly on the label."
+        );
+      }
     }
   };
 
@@ -955,7 +976,13 @@ export default function ScannerScreen() {
               <Text style={{ fontSize: 24 }}>⚠️</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: "#FCA5A5", fontSize: 14, fontWeight: "900" }}>
-                  {scanMode === "barcode" ? "Barcode Not Detected" : "Unrecognized Product or Label"}
+                  {scanError.toLowerCase().includes("backend") ||
+                  scanError.toLowerCase().includes("connect") ||
+                  scanError.toLowerCase().includes("network")
+                    ? "Backend Server Offline"
+                    : scanMode === "barcode"
+                    ? "Barcode Not Detected"
+                    : "Label Not Clearly Readable"}
                 </Text>
                 <Text style={{ color: "#F1F5F9", fontSize: 12, marginTop: 2, lineHeight: 17 }}>
                   {scanError}

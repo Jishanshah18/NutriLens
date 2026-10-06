@@ -10,7 +10,7 @@ import base64
 import joblib
 import numpy as np
 from io import BytesIO
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from models.schemas import (
     UserProfile,
@@ -358,15 +358,21 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
     # 1. Non-Food & Foreign Object Classification
     is_food, food_reason, stats = classify_food_item(ocr_text)
     if not is_food:
-        return AnalyzeResponse(
-            is_food=False,
-            rejection_reason=food_reason,
-            product_name="Non-Food / Foreign Object",
-            health_score=0,
-            nova_group=None,
-            personalized_verdict=f"⚠️ Non-Food Detected: {food_reason} NutriLens only evaluates edible food items, packaged snacks, beverages, and ingredient labels.",
-            ocr_text=ocr_text
-        )
+        # Check if matched in product catalog or nutrition facts table exists
+        catalog_match_check = _find_catalog_match(ocr_text)
+        nutrition_check = parse_nutrition_facts(ocr_text)
+        if catalog_match_check or nutrition_check.get("parsed_count", 0) >= 1:
+            is_food = True
+        else:
+            return AnalyzeResponse(
+                is_food=False,
+                rejection_reason=food_reason,
+                product_name="Non-Food / Foreign Object",
+                health_score=0,
+                nova_group=None,
+                personalized_verdict=f"⚠️ Non-Food Detected: {food_reason} NutriLens only evaluates edible food items, packaged snacks, beverages, and ingredient labels.",
+                ocr_text=ocr_text
+            )
 
     # 2. Food Confirmed: Run ML inference and Nutritional Audit
     cleaned_text = clean_ingredient_text(ocr_text)
@@ -624,35 +630,53 @@ def _find_catalog_match(text: str) -> Optional[Dict[str, Any]]:
                 (r"good day.*?cashew", "Britannia Good Day Cashew Cookies"),
                 (r"good day.*?pista", "Britannia Good Day Pista Badam Cookies"),
                 (r"bourbon", "Britannia Bourbon Chocolate Cream Biscuits"),
-                (r"marie gold", "Britannia Marie Gold Biscuits"),
+                (r"marie gold|marie", "Britannia Marie Gold Biscuits"),
                 (r"parle[- ]?g|parleg", "Parle-G Original Gluco Biscuits"),
                 (r"monaco", "Parle Monaco Salted Crackers"),
+                (r"krackjack", "Parle Krackjack Crackers"),
                 (r"hide.*?seek", "Parle Hide & Seek Chocolate Chip Cookies"),
                 (r"maggi.*?masala|maggi", "Maggi 2-Minute Masala Noodles"),
                 (r"kitkat|kit kat", "Nestlé KitKat 4-Finger Wafer Bar"),
                 (r"lay'?s.*?magic masala", "Lay's India's Magic Masala Potato Chips"),
                 (r"lay'?s.*?cream|lay'?s.*?onion", "Lay's American Style Cream & Onion Potato Chips"),
                 (r"lay'?s.*?classic|lay'?s.*?salted|lay'?s|lays", "Lay's Classic Salted Potato Chips"),
+                (r"doritos.*?nacho|doritos", "Doritos Nacho Cheese Flavored Tortilla Chips"),
+                (r"pringles.*?sour cream|pringles", "Pringles Original Potato Crisps"),
                 (r"kurkure", "Kurkure Masala Munch"),
                 (r"aloo bhujia", "Haldiram's Nagpur Aloo Bhujia"),
                 (r"bhujia sev|bhujia", "Haldiram's Bhujia Sev"),
                 (r"dairy milk.*?silk", "Cadbury Dairy Milk Silk Chocolate"),
                 (r"dairy milk", "Cadbury Dairy Milk Chocolate"),
+                (r"5 star|five star", "Cadbury 5 Star Chocolate Bar"),
+                (r"perk", "Cadbury Perk Wafer Chocolate"),
+                (r"munch", "Nestle Munch Wafer Chocolate"),
+                (r"snickers", "Snickers Chocolate Bar"),
                 (r"oreo", "Oreo Original Vanilla Creme Cookies"),
+                (r"nutella", "Nutella Hazelnut Cocoa Spread"),
                 (r"amul.*?butter", "Amul Pasteurized Salted Butter"),
                 (r"amul.*?ghee", "Amul Pure Cow Ghee"),
                 (r"amul.*?cheese", "Amul Processed Cheese Blocks / Slices"),
-                (r"amul.*?milk|taaza", "Amul Taaza Homogenised Toned Milk"),
+                (r"amul.*?milk|amul.*?taaza|taaza", "Amul Taaza Homogenised Toned Milk"),
                 (r"dark fantasy", "Sunfeast Dark Fantasy Choco Fills Cookies"),
                 (r"coca[- ]?cola|coke", "Coca-Cola Original Taste"),
-                (r"thums up", "Thums Up Charged Cola"),
+                (r"thums up|thumsup", "Thums Up Charged Cola"),
                 (r"sprite", "Sprite Lemon-Lime Carbonated Drink"),
+                (r"fanta", "Fanta Orange Carbonated Drink"),
+                (r"7up|seven up", "7Up Lemon Lime Drink"),
+                (r"pepsi", "Pepsi Cola"),
                 (r"frooti", "Frooti Real Mango Drink"),
+                (r"maaza", "Maaza Mango Drink"),
+                (r"paper boat|paperboat", "Paper Boat Aamras Mango Drink"),
                 (r"red bull", "Red Bull Energy Drink"),
+                (r"monster energy|monster", "Monster Energy Drink Original"),
                 (r"quaker.*?oats|rolled oats", "Quaker Rolled Oats Whole Grain"),
                 (r"corn flakes", "Kellogg's Corn Flakes Original"),
+                (r"chocos", "Kellogg's Chocos Chocolate Cereal"),
                 (r"aashirvaad|atta", "Aashirvaad Shudh Chakki Atta"),
-                (r"tata salt", "Tata Salt Vacuum Evaporated Iodized Salt")
+                (r"tata salt", "Tata Salt Vacuum Evaporated Iodized Salt"),
+                (r"chobani", "Chobani Greek Yogurt Plain Non-Fat 150G"),
+                (r"peanut butter", "Pintola All Natural Peanut Butter"),
+                (r"whey protein", "Optimum Nutrition Gold Standard 100% Whey")
             ]
 
             full_cols = """
@@ -765,15 +789,23 @@ def _extract_smart_product_name(ocr_text: str, catalog_match: Optional[Dict[str,
         "net", "serving", "calories", "calorie", "distributed", "contains", "manufactured",
         "batch", "lot", "fssai", "mrp", "per 100", "directions", "allergen", "weight", "wt",
         "total fat", "saturated fat", "trans fat", "cholesterol", "sodium", "total carb",
-        "carbohydrate", "protein", "sugars", "dietary fiber"
+        "carbohydrate", "protein", "sugars", "dietary fiber", "energy", "kj", "total",
+        "sugar", "fat", "carb", "carbs", "salt", "fibre", "fiber", "vitamin", "calcium", "iron"
     )
+
+    is_nutrition_table = any("nutrition" in l.lower() or "calories" in l.lower() or "typical values" in l.lower() for l in lines)
+    is_ingredient_list = any("ingredient" in l.lower() or "contains" in l.lower() for l in lines)
 
     clean_candidate = ""
     for line in lines:
         cleaned = re.sub(r'^[^\w]+', '', line)
-        cleaned = re.sub(r'\b(net\s*wt|serving|calories|exp|mfg|batch)\b.*$', '', cleaned, flags=re.I).strip()
+        cleaned = re.sub(r'\b(net\s*wt|serving|calories|exp|mfg|batch|mrp)\b.*$', '', cleaned, flags=re.I).strip()
         first_word = cleaned.split()[0].lower() if cleaned.split() else ""
-        if any(first_word.startswith(p) for p in ignore_prefixes):
+        line_lower = cleaned.lower()
+        if any(line_lower.startswith(p) or first_word.startswith(p) for p in ignore_prefixes):
+            continue
+        # Also ignore lines that are mostly numeric or nutrition values (e.g. "140 kcal", "4.5g")
+        if re.search(r'^\s*\d+[\.\d]*\s*(g|mg|kcal|cal|kj|%)\b', line_lower):
             continue
         cleaned = re.sub(r'[\d\.,;:\-]+$', '', cleaned).strip()
         if 3 <= len(cleaned) <= 60:
@@ -794,11 +826,16 @@ def _extract_smart_product_name(ocr_text: str, catalog_match: Optional[Dict[str,
     if primary and len(primary[0]) >= 3:
         clean_res = primary[0][:45].strip()
         clean_res = re.sub(r'\bProduct\b', '', clean_res, flags=re.I).strip()
-        single_ing = {"water", "sugar", "salt", "refined wheat flour", "wheat flour", "flour", "palm oil", "edible vegetable oil", "milk solids", "vegetable oil", "oil", "yeast", "cocoa solids", "milk"}
+        single_ing = {"water", "sugar", "salt", "refined wheat flour", "wheat flour", "flour", "palm oil", "edible vegetable oil", "milk solids", "vegetable oil", "oil", "yeast", "cocoa solids", "milk", "total"}
         if clean_res.lower() not in single_ing and len(clean_res) >= 3:
             return clean_res.title()
 
-    return "Scanned Food Label"
+    if is_nutrition_table:
+        return "Nutrition Facts Label"
+    if is_ingredient_list:
+        return "Scanned Ingredients Label"
+
+    return "Scanned Food Product"
 
 
 def _find_healthier_alternatives(cleaned_text: str, current_nova: int, current_score: int) -> List[AlternativeProduct]:
@@ -879,6 +916,10 @@ def parse_nutrition_facts(text: str) -> Dict[str, Any]:
     t = re.sub(r'\b[oO]\s*mg\b', '0mg', t)
     t = re.sub(r'\b[oO]\s*kcal\b', '0kcal', t)
     t = re.sub(r'([0-9]),([0-9])', r'\1.\2', t)
+    # Separate word characters from digits when fused by OCR (e.g. fat9g -> fat 9g, calories210 -> calories 210)
+    t = re.sub(r'([a-zA-Z]{2,})([0-9])', r'\1 \2', t)
+    # Separate units fused with next word (e.g. 13gprotein -> 13g protein)
+    t = re.sub(r'([0-9](?:kcal|kj|mg|mcg|g|oz|ml))([a-zA-Z]{2,})', r'\1 \2', t)
 
     res: Dict[str, Any] = {
         "calories": None,
@@ -1211,7 +1252,7 @@ def get_rapidocr_engine():
 def extract_text_from_image_base64(image_base64: str) -> str:
     """
     Extracts text from a base64 encoded image using high-speed local OCR.
-    Uses RapidOCR (ONNX) as primary engine with enhanced preprocessing
+    Uses RapidOCR (ONNX) as primary engine with adaptive sharpening, CLAHE,
     and multi-orientation passes for maximum text extraction from real-world photos.
     """
     global _last_ocr_debug
@@ -1221,9 +1262,15 @@ def extract_text_from_image_base64(image_base64: str) -> str:
     if "," in image_base64:
         image_base64 = image_base64.split(",")[1]
 
+    image_base64 = re.sub(r'\s+', '', image_base64)
+    missing_padding = len(image_base64) % 4
+    if missing_padding:
+        image_base64 += "=" * (4 - missing_padding)
+
     try:
         image_bytes = base64.b64decode(image_base64)
         from PIL import Image, ImageEnhance, ImageOps, ImageFilter
+        import cv2
 
         img = Image.open(BytesIO(image_bytes))
 
@@ -1236,16 +1283,24 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
 
-        # 2. Adaptive scaling: downscale huge photos (>1600px) for speed; upscale tiny photos (<800px)
+        # 2. Quality check: evaluate brightness and blur metric
+        np_check = np.array(img)
+        mean_brightness = float(np.mean(np_check))
+        _last_ocr_debug = ""
+        if mean_brightness < 20.0:
+            _last_ocr_debug = "dark_image: Mean brightness is very low (<20)"
+        elif mean_brightness > 248.0 and float(np.std(np_check)) < 5.0:
+            _last_ocr_debug = "blank_image: Image is almost solid white"
+
+        # 3. Adaptive scaling: downscale huge photos (>1024px) for 3x OCR speed; upscale tiny photos (<700px)
         max_dim = max(img.width, img.height)
-        if max_dim > 1600:
-            scale = 1600.0 / max_dim
+        if max_dim > 1024:
+            scale = 1024.0 / max_dim
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
-        elif img.width < 800 and img.width > 0:
-            scale = 800.0 / img.width
+        elif img.width < 700 and img.width > 0:
+            scale = 700.0 / img.width
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
 
-        # 3. Create multiple enhanced variants for OCR passes (including mirrored orientations for webcams)
         from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS
 
         def _clean_ocr_tokens(raw_t: str) -> str:
@@ -1260,84 +1315,86 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             if not t:
                 return 0
             tl = t.lower()
-            food_count = sum(1 for w in FOOD_INGREDIENT_TOKENS if w in tl)
+            food_count = sum(1 for w in FOOD_INGREDIENT_TOKENS if re.search(r'\b' + re.escape(w) + r'\b', tl) or (len(w) >= 4 and w in tl))
             nutri_count = sum(1 for w in NUTRITION_FACTS_TERMS if w in tl)
-            return food_count * 20 + nutri_count * 12 + len(t.split())
+            return food_count * 20 + nutri_count * 15 + len(t.split())
 
-        img_mirrored = ImageOps.mirror(img)
-
-        img_variants = [
-            ("original", img),
-            ("mirrored", img_mirrored),
-        ]
-
-        try:
-            enhanced = ImageEnhance.Contrast(img).enhance(1.9)
-            enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.8)
-            img_variants.append(("contrast", enhanced))
-            img_variants.append(("contrast_mirrored", ImageOps.mirror(enhanced)))
-        except Exception:
-            pass
-
-        try:
-            gray = img.convert("L")
-            gray = ImageEnhance.Contrast(gray).enhance(2.2)
-            img_variants.append(("gray", gray))
-            img_variants.append(("gray_mirrored", ImageOps.mirror(gray)))
-        except Exception:
-            pass
-
-        # 4. Engine 1: RapidOCR (Primary - Pure ONNX, fast, highly accurate)
         best_text = ""
         best_score = 0
 
+        # RapidOCR engine
         ocr_engine = get_rapidocr_engine()
-        if ocr_engine is not None:
-            for tag, variant in img_variants:
-                try:
-                    img_array = np.array(variant.convert("RGB") if variant.mode == "L" else variant)
-                    result, _ = ocr_engine(img_array)
-                    if result:
-                        lines = [str(item[1]).strip() for item in result if item and len(item) > 1 and item[1]]
-                        text = "\n".join(lines).strip()
-                        text = _clean_ocr_tokens(text)
-                        score = _score_text(text)
-                        if score > best_score:
-                            best_text = text
-                            best_score = score
-                            # Fast exit if we already have strong food and nutrition matches
-                            if score >= 35:
-                                break
-                except Exception:
-                    continue
 
-            # Try 90° and 270° rotations if initial score is low
-            if best_score < 10:
-                for angle in [90, 270]:
-                    for base_v in [img, img_mirrored]:
-                        try:
-                            rotated = base_v.rotate(angle, expand=True)
-                            result, _ = ocr_engine(np.array(rotated))
-                            if result:
-                                lines = [str(item[1]).strip() for item in result if item and len(item) > 1 and item[1]]
-                                text = _clean_ocr_tokens("\n".join(lines).strip())
-                                score = _score_text(text)
-                                if score > best_score:
-                                    best_text = text
-                                    best_score = score
-                        except Exception:
-                            continue
+        def _run_engine(pil_image) -> Tuple[str, int]:
+            try:
+                arr = np.array(pil_image.convert("RGB") if pil_image.mode != "RGB" else pil_image)
+                res, _ = ocr_engine(arr)
+                if res:
+                    lines = [str(item[1]).strip() for item in res if item and len(item) > 1 and item[1]]
+                    txt = _clean_ocr_tokens("\n".join(lines).strip())
+                    sc = _score_text(txt)
+                    return txt, sc
+            except Exception:
+                pass
+            return "", 0
+
+        if ocr_engine is not None:
+            # Pass 1: Original image
+            t1, s1 = _run_engine(img)
+            if s1 > best_score:
+                best_text, best_score = t1, s1
+                # Early return if strong text extracted
+                if best_score >= 20 or len(best_text.split()) >= 15:
+                    return best_text
+
+            # Pass 2: Unsharp Mask for sharpening blurry or soft packaging text
+            unsharp = img.filter(ImageFilter.UnsharpMask(radius=2.0, percent=180, threshold=2))
+            t2, s2 = _run_engine(unsharp)
+            if s2 > best_score:
+                best_text, best_score = t2, s2
+                if best_score >= 20:
+                    return best_text
+
+            # Pass 3: CLAHE adaptive contrast (uneven lighting, glossy wrappers)
+            try:
+                gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+                gray_clahe = Image.fromarray(clahe.apply(gray_cv))
+                t3, s3 = _run_engine(gray_clahe)
+                if s3 > best_score:
+                    best_text, best_score = t3, s3
+                    if best_score >= 20:
+                        return best_text
+            except Exception:
+                pass
+
+            # Pass 4: Inverted (white text on dark packaging e.g. Cadbury, Oreo, Coke)
+            if best_score < 12:
+                try:
+                    inverted = ImageOps.invert(img.convert("RGB"))
+                    t4, s4 = _run_engine(inverted)
+                    if s4 > best_score:
+                        best_text, best_score = t4, s4
+                except Exception:
+                    pass
+
+            # Pass 5: 90° and 270° rotations ONLY if score is still very low (< 6)
+            if best_score < 6:
+                for angle in (90, 270):
+                    rotated = img.rotate(angle, expand=True)
+                    tr, sr = _run_engine(rotated)
+                    if sr > best_score:
+                        best_text, best_score = tr, sr
+                        if best_score >= 15:
+                            break
 
             if best_text and len(best_text.split()) >= 1:
                 return best_text
 
-        # 5. Engine 2: Windows native WinRT OCR (Windows only fallback)
-        if os.name == 'nt':
+        # Engine 2: Windows WinOCR fallback
+        if os.name == 'nt' and (not best_text or best_score < 5):
             try:
-                import winocr
-                import asyncio
-                import concurrent.futures
-
+                import winocr, asyncio, concurrent.futures
                 def _run_winocr_sync(target_img):
                     try:
                         async def _do():
@@ -1351,37 +1408,35 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                             loop.close()
                     except Exception:
                         return ""
-
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    win_text = pool.submit(_run_winocr_sync, img).result(timeout=4.0)
-                    if not win_text or len(win_text.split()) < 2:
-                        win_mirrored = pool.submit(_run_winocr_sync, img_mirrored).result(timeout=4.0)
-                        if win_mirrored and len(win_mirrored.split()) > len(win_text.split()):
-                            win_text = win_mirrored
-
-                if win_text and len(win_text.split()) >= 1:
-                    return _clean_ocr_tokens(win_text)
+                    win_text = pool.submit(_run_winocr_sync, img).result(timeout=3.5)
+                    if win_text and len(win_text.split()) >= 1:
+                        sc = _score_text(win_text)
+                        if sc > best_score:
+                            best_text = _clean_ocr_tokens(win_text)
+                            best_score = sc
             except Exception:
                 pass
 
-        # 6. Engine 3: Pytesseract fallback if installed
-        try:
-            import pytesseract
-            tess_text = pytesseract.image_to_string(img).strip()
-            if not tess_text or len(tess_text.split()) < 2:
-                tess_text_mirrored = pytesseract.image_to_string(img_mirrored).strip()
-                if tess_text_mirrored and len(tess_text_mirrored.split()) > len(tess_text.split()):
-                    tess_text = tess_text_mirrored
-            if tess_text and len(tess_text.split()) >= 1:
-                return _clean_ocr_tokens(tess_text)
-        except Exception:
-            pass
+        # Engine 3: Pytesseract fallback (Render / Docker Linux)
+        if not best_text or best_score < 5:
+            try:
+                import pytesseract
+                tess_text = pytesseract.image_to_string(img, config="--psm 6").strip()
+                if not tess_text:
+                    tess_text = pytesseract.image_to_string(img, config="--psm 11").strip()
+                if tess_text:
+                    sc = _score_text(tess_text)
+                    if sc > best_score:
+                        best_text = _clean_ocr_tokens(tess_text)
+            except Exception:
+                pass
 
-        # Return whatever we got from best effort
         if best_text:
             return best_text
 
     except Exception as e:
+        _last_ocr_debug = f"error: {str(e)}"
         print(f"Error decoding and processing image for OCR: {e}")
 
     return ""
@@ -1398,7 +1453,7 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
     # 1. First check if photo contains a readable barcode (works cross-platform via zxing-cpp)
     try:
         from services.barcode_service import decode_barcode_from_image
-        detected_barcode = decode_barcode_from_image(image_base64)
+        detected_barcode = decode_barcode_from_image(image_base64, allow_ocr_fallback=False)
         if detected_barcode:
             barcode_res = analyze_ingredients(f"Scanned Barcode GTIN: {detected_barcode}", profile)
             if barcode_res.is_food:
@@ -1410,13 +1465,19 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
     extracted_text = extract_text_from_image_base64(image_base64)
 
     if not extracted_text or not extracted_text.strip():
+        rejection_msg = "No readable packaging text or nutrition label was detected in this photo. Please hold the camera 4–6 inches away in good lighting and tap to focus on the label."
+        debug_status = get_last_ocr_debug()
+        if "dark" in debug_status.lower():
+            rejection_msg = "Image is too dark to read clearly. Please turn on your camera flash or capture the package in bright lighting."
+        elif "blank" in debug_status.lower():
+            rejection_msg = "Image appears blank or overexposed. Please aim your camera directly at the food packaging."
         return AnalyzeResponse(
             is_food=False,
-            rejection_reason="No readable ingredient text or nutrition label was detected in this image. Please ensure the food label or ingredient list is clearly visible and well-lit.",
+            rejection_reason=rejection_msg,
             product_name="Unrecognized Image",
             health_score=0,
             nova_group=None,
-            personalized_verdict="⚠️ Unrecognized Image: No readable ingredients or nutrition facts could be extracted from this photo. Please capture a clear, well-lit view of the food packaging.",
+            personalized_verdict=f"⚠️ {rejection_msg}",
             ocr_text=""
         )
 

@@ -11,5 +11,5 @@ pillow>=10.2.0
 python-multipart>=0.0.9
 zxing-cpp>=3.1.0
 pytesseract>=0.3.10
-opencv-python==4.10.0.84
+opencv-python-headless>=4.9.0.80
 rapidocr-onnxruntime>=1.2.3

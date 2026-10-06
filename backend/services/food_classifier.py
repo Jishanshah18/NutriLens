@@ -70,15 +70,24 @@ FOOD_INGREDIENT_TOKENS = {
     "mayo", "mayonnaise", "jam", "jelly", "pickle", "chutney",
 
     # Iconic Packaged Food Brands & Products
-    "parle", "britannia", "amul", "nestle", "cadbury", "lays", "haldiram", "bingo",
-    "doritos", "pringles", "oreo", "kitkat", "snickers", "bournvita", "horlicks",
-    "complan", "kelloggs", "saffola", "fortune", "tata", "kissan", "knorr", "mtr",
-    "dabur", "patanjali", "mother dairy", "epigamia", "paper boat", "nutella",
-    "ferrero", "sunfeast", "dark fantasy", "good day", "marie gold", "bourbon",
-    "monaco", "frooti", "appy", "limca", "mirinda", "mountain dew", "sting",
-    "monster", "red bull", "cheetos", "chocos", "boost", "nescafe", "bru",
-    "lipton", "taj mahal", "red label", "bikaji", "balaji", "quaker", "tropicana",
-    "hershey", "mars", "twix", "bounty", "milka", "lindt", "toblerone", "m&m"
+    "parle", "parle-g", "parleg", "britannia", "amul", "nestle", "cadbury", "lays", "lay's", "haldiram",
+    "bingo", "tedhe medhe", "mad angles", "doritos", "pringles", "oreo", "kitkat", "snickers", "bournvita",
+    "horlicks", "complan", "kelloggs", "kellogg", "saffola", "fortune", "tata", "kissan", "knorr", "mtr",
+    "dabur", "patanjali", "mother dairy", "epigamia", "paper boat", "paperboat", "nutella", "ferrero",
+    "sunfeast", "dark fantasy", "good day", "marie gold", "marie", "bourbon", "monaco", "krackjack",
+    "hide & seek", "hide and seek", "50-50", "pure magic", "milk bikis", "treat", "bounce", "frooti",
+    "appy", "appy fizz", "limca", "mirinda", "mountain dew", "sting", "monster", "red bull", "cheetos",
+    "chocos", "boost", "nescafe", "bru", "lipton", "taj mahal", "red label", "bikaji", "balaji", "quaker",
+    "tropicana", "hershey", "mars", "twix", "bounty", "milka", "lindt", "toblerone", "m&m", "m&ms",
+    "munch", "perk", "dairy milk", "5 star", "silk", "milkybar", "bar one", "fuse", "gems", "eclairs",
+    "chings", "ching's", "too yumm", "tooyumm", "crax", "uncle chipps", "uncle chips", "yippee", "top ramen",
+    "wai wai", "cup noodles", "indomie", "maggi sauce", "heinz", "del monte", "veeba", "funfoods",
+    "nutrela", "soya chunks", "real", "b-natural", "raw pressery", "maaza", "slice", "fizz", "thums up",
+    "thumsup", "coke", "coca-cola", "sprite", "fanta", "7up", "seven up", "pepsi", "glucon-d", "tang",
+    "rasna", "rooh afza", "amul kool", "amul taaza", "amul gold", "nandini", "aavin", "milma", "verka",
+    "heritage", "gowardhan", "aashirvaad", "pillsbury", "act ii", "act-ii", "cornitos", "mccain",
+    "safal", "milo", "ensure", "protinex", "muscleblaze", "myprotein", "peanut butter", "myfitness",
+    "pintola", "alpino", "disano"
 }
 
 # Standard Nutrition Facts panel terminology
@@ -220,7 +229,7 @@ def classify_food_item(text: str) -> Tuple[bool, str, Dict[str, Any]]:
         )
 
     # Rule D: Food packaging measurements or serving patterns (e.g. "Net Wt 50g", "120 kcal", "Batch No")
-    has_food_measurement = bool(re.search(r'\b\d+\s*(g|gm|gms|kg|ml|kcal|cal|kj)\b', text_lower))
+    has_food_measurement = bool(re.search(r'\b\d+\s*(g|gm|gms|kg|ml|l|oz|lb|kcal|cal|kj)\b', text_lower))
     if has_food_measurement and len(non_food_matches) == 0:
         return (
             True,
@@ -228,9 +237,57 @@ def classify_food_item(text: str) -> Tuple[bool, str, Dict[str, Any]]:
             stats
         )
 
+    # Rule D2: Check if any token matches the 40,000+ item food_catalog database in nutrilens.db
+    if len(non_food_matches) == 0 and check_food_catalog_match(text):
+        return (
+            True,
+            "Recognized Food Product: Verified match found in NutriLens food database catalog.",
+            stats
+        )
+
     # Rule E: No food markers whatsoever and completely unidentifiable
     return (
         False,
-        "Unrecognized Content: No food ingredients, additives, or nutrition facts were found in this scan.",
+        "Unrecognized Content: No food ingredients, brand name, or nutrition facts could be recognized. Please point the camera directly at the food packaging label or barcode.",
         stats
     )
+
+
+def check_food_catalog_match(text: str) -> bool:
+    """Checks if any prominent candidate tokens or 2-word phrases match the 40k+ verified foods catalog."""
+    if not text:
+        return False
+    try:
+        import os, sqlite3
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        db_path = os.path.join(base_dir, "nutrilens.db")
+        if not os.path.exists(db_path):
+            return False
+        conn = sqlite3.connect(db_path, timeout=3.0)
+        cur = conn.cursor()
+        
+        # Check title lines first
+        lines = [l.strip().lower() for l in re.split(r'[\r\n]+', text) if l.strip()]
+        for l in lines[:3]:
+            clean_l = re.sub(r'[^\w\s]', '', l).strip()
+            if 3 <= len(clean_l) <= 40:
+                cur.execute("SELECT 1 FROM food_catalog WHERE food_name LIKE ? OR brand LIKE ? LIMIT 1", (f"%{clean_l}%", f"%{clean_l}%"))
+                if cur.fetchone():
+                    conn.close()
+                    return True
+
+        # Check prominent tokens
+        tokens = [t.strip() for t in re.split(r'[\r\n\s,;]+', text.lower()) if len(t.strip()) >= 4]
+        stop_words = {"this", "that", "with", "from", "your", "best", "date", "pack", "item", "code", "size"}
+        for tok in tokens[:6]:
+            if tok in stop_words:
+                continue
+            cur.execute("SELECT 1 FROM food_catalog WHERE food_name LIKE ? OR brand LIKE ? LIMIT 1", (f"%{tok}%", f"%{tok}%"))
+            if cur.fetchone():
+                conn.close()
+                return True
+
+        conn.close()
+    except Exception:
+        pass
+    return False

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+import base64
 from typing import List, Optional
 from models.schemas import (
     AnalyzeRequest,
@@ -67,6 +68,64 @@ async def analyze_image_endpoint(request: AnalyzeImageRequest):
         raise HTTPException(status_code=500, detail=f"Failed to analyze image: {str(e)}")
 
 
+@router.post("/analyze-label-image", response_model=AnalyzeResponse)
+@router.post("/analyze-image-file", response_model=AnalyzeResponse)
+async def analyze_label_image_file_endpoint(
+    image: Optional[UploadFile] = File(None),
+    file: Optional[UploadFile] = File(None),
+    user_id: Optional[str] = Form("default_user")
+):
+    """
+    Multipart/form-data image upload endpoint.
+    Accepts raw food packaging photos up to 15MB, decodes them, and runs full ML/OCR analysis.
+    """
+    target_upload = image or file
+    if not target_upload:
+        raise HTTPException(
+            status_code=400,
+            detail="No image provided. Please upload an image using field name 'image' or 'file'."
+        )
+
+    try:
+        contents = await target_upload.read()
+    except Exception as read_err:
+        raise HTTPException(status_code=400, detail=f"Failed to read image stream: {str(read_err)}")
+
+    if not contents or len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded image file is empty.")
+
+    if len(contents) > 15 * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail="Image size exceeds maximum limit of 15 MB. Please upload a smaller photo."
+        )
+
+    try:
+        image_b64 = base64.b64encode(contents).decode("utf-8")
+        from services.user_service import get_user_profile
+        profile = get_user_profile(user_id) if user_id and user_id != "guest" else None
+
+        response = analyze_label_image(image_b64, profile)
+
+        # Save valid food scans to history
+        if response.is_food and user_id and user_id not in ["guest", ""]:
+            saved_text = response.ocr_text if response.ocr_text else (response.product_name or "Image Scan")
+            save_scan_history(response, saved_text, user_id=user_id)
+
+        # If detected as non-food, return 422 with descriptive rejection reason
+        if response.is_food is False:
+            raise HTTPException(
+                status_code=422,
+                detail=response.rejection_reason or "Image unrecognized as food packaging. Please capture a food package label."
+            )
+
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process food image: {str(e)}")
+
+
 @router.get("/barcode/{barcode}", response_model=AnalyzeResponse)
 async def analyze_barcode_endpoint(barcode: str, user_id: str = "default_user"):
     """
@@ -93,7 +152,7 @@ async def analyze_barcode_image_endpoint(request: AnalyzeImageRequest):
         from services.barcode_service import decode_barcode_from_image
         from services.user_service import get_user_profile
 
-        barcode = decode_barcode_from_image(request.image_base64)
+        barcode = decode_barcode_from_image(request.image_base64, allow_ocr_fallback=True)
         profile = request.user_profile
         user_id = profile.user_id if profile and profile.user_id else "default_user"
         if not profile:
