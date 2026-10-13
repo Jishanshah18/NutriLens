@@ -13,14 +13,14 @@ import {
   User as FirebaseUser
 } from "firebase/auth";
 
-// Public Firebase Client Configuration for NutriLens
+// Public Firebase Client Configuration for NutriLens (nutrilens-13ad2)
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "AIzaSy_NUTRILENS_PLACEHOLDER_KEY",
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "nutrilens-app.firebaseapp.com",
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "nutrilens-app",
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "nutrilens-app.appspot.com",
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "1234567890",
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:1234567890:web:abcdef123456",
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "nutrilens-13ad2.firebaseapp.com",
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "nutrilens-13ad2",
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "nutrilens-13ad2.firebasestorage.app",
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "781410208219",
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:781410208219:web:placeholder",
   measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || ""
 };
 
@@ -31,6 +31,7 @@ export const isFirebaseConfigured = (): boolean => {
     key &&
     key.length > 10 &&
     !key.includes("PLACEHOLDER") &&
+    !key.includes("YOUR_") &&
     !key.includes("your_")
   );
 };
@@ -89,8 +90,12 @@ export const getFriendlyFirebaseErrorMessage = (error: any): string => {
       if (rawMsg.toLowerCase().includes("network")) {
         return "Network error. Please check your internet connection and try again.";
       }
-      if (rawMsg.toLowerCase().includes("api key not valid") || rawMsg.toLowerCase().includes("invalid-api-key")) {
-        return "Firebase API Key is pending setup. Please configure your Firebase environment variables.";
+      if (
+        code === "auth/invalid-api-key" ||
+        rawMsg.toLowerCase().includes("api key not valid") ||
+        rawMsg.toLowerCase().includes("invalid-api-key")
+      ) {
+        return "Firebase Web API Key is needed. In Firebase Console, go to Project Settings > General > Web App and copy your Web API Key into EXPO_PUBLIC_FIREBASE_API_KEY in frontend/.env.";
       }
       return rawMsg.replace(/^Firebase:\s*/i, "").trim() || "Authentication request failed. Please try again.";
   }
