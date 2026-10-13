@@ -284,31 +284,26 @@ const isLocalhostEnv = isBrowser && (
   window.location?.hostname === "::1"
 );
 
+const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
+const RENDER_CLOUD_URL = "https://nutrilens-jfiv.onrender.com/api";
+
 // Candidate backend URLs in priority order:
-// In local development: local FastAPI server first, then cloud Render fallback.
-// In HTTPS production (Vercel): EXPO_PUBLIC_API_URL or cloud Render backend.
-const CANDIDATE_BASE_URLS: string[] = (
-  isHttpsBrowser
-    ? [
-        process.env.EXPO_PUBLIC_API_URL,
-        "https://nutrilens-jfiv.onrender.com/api"
-      ]
-    : [
-        "http://127.0.0.1:8000/api",
-        "http://localhost:8000/api",
-        process.env.EXPO_PUBLIC_API_URL,
-        "https://nutrilens-jfiv.onrender.com/api"
-      ]
-).filter(Boolean) as string[];
+// 1. Explicitly configured EXPO_PUBLIC_API_URL
+// 2. Production Render Cloud Backend (https://nutrilens-jfiv.onrender.com/api)
+// 3. Localhost fallbacks (http://127.0.0.1:8000/api)
+const CANDIDATE_BASE_URLS: string[] = [
+  CONFIGURED_API_URL,
+  RENDER_CLOUD_URL,
+  "http://127.0.0.1:8000/api",
+  "http://localhost:8000/api"
+].filter(Boolean) as string[];
 
 let _cachedWorkingUrl: string | null = null;
 
 export const getApiBaseUrl = (): string => {
   if (_cachedWorkingUrl) return _cachedWorkingUrl;
-  if (!isHttpsBrowser && isLocalhostEnv) return "http://127.0.0.1:8000/api";
-  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-  if (isHttpsBrowser) return "https://nutrilens-jfiv.onrender.com/api";
-  return "http://127.0.0.1:8000/api";
+  if (CONFIGURED_API_URL) return CONFIGURED_API_URL;
+  return RENDER_CLOUD_URL;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -319,6 +314,26 @@ export const API_BASE_URL = getApiBaseUrl();
  */
 export async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+
+  // Automatically attach Bearer token if session is active
+  const token = getAuthToken();
+  const requestHeaders: Record<string, string> = {};
+  if (options.headers) {
+    if (typeof (options.headers as any).forEach === "function") {
+      (options.headers as any).forEach((v: string, k: string) => {
+        requestHeaders[k] = v;
+      });
+    } else {
+      Object.assign(requestHeaders, options.headers);
+    }
+  }
+  if (token && !requestHeaders["Authorization"]) {
+    requestHeaders["Authorization"] = `Bearer ${token}`;
+  }
+  const mergedOptions: RequestInit = {
+    ...options,
+    headers: requestHeaders
+  };
 
   // Prioritize cached working URL if verified in current session
   const urlsToTry: string[] = [];
@@ -348,7 +363,7 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(fullUrl, {
-        ...options,
+        ...mergedOptions,
         signal: controller.signal
       });
 
@@ -482,8 +497,9 @@ export const getUserProfile = async (userId?: string): Promise<UserProfile> => {
   const cached = getSavedUserProfile(targetId);
 
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/user/profile?user_id=${encodeURIComponent(targetId)}`);
+    const response = await apiFetch(`/user/profile?user_id=${encodeURIComponent(targetId)}`, {
+      method: "GET"
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data: UserProfile = await response.json();
     setSavedUserProfile(data);
@@ -503,8 +519,7 @@ export const updateUserProfile = async (profile: UserProfile): Promise<UserProfi
   }
 
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/user/profile`, {
+    const response = await apiFetch("/user/profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(profile),
@@ -517,6 +532,78 @@ export const updateUserProfile = async (profile: UserProfile): Promise<UserProfi
     console.warn("Notice: Saved user profile locally (backend sync skipped):", error);
     return profile;
   }
+};
+
+/**
+ * Synchronizes Firebase-authenticated user identity with backend persistent database,
+ * preserving existing Supabase and SQLite data, and returning the updated profile.
+ */
+export const syncFirebaseUserWithBackend = async (
+  uid: string,
+  email?: string,
+  fullName?: string,
+  idToken?: string
+): Promise<UserAuthResponse> => {
+  const token = idToken || getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await apiFetch("/user/firebase-sync", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        uid,
+        email: email || "",
+        full_name: fullName || ""
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const authResponse: UserAuthResponse = {
+        success: true,
+        user_id: data.user_id || uid,
+        email: data.email || email || "",
+        full_name: data.full_name || fullName || "NutriLens Member",
+        token: token || "nutrilens_session_active",
+        message: "Synced successfully",
+        profile: data.profile || { ...DEFAULT_USER_PROFILE, user_id: uid, email: email || "", full_name: fullName || "NutriLens Member" }
+      };
+      setActiveUserId(authResponse.user_id);
+      setSavedUserProfile(authResponse.profile);
+      if (token) setAuthToken(token);
+      return authResponse;
+    }
+  } catch (e) {
+    console.warn("Notice during Firebase backend sync (offline or initial connection):", e);
+  }
+
+  // Fallback to local profile when backend sync is offline
+  const fallbackProf: UserProfile = {
+    ...DEFAULT_USER_PROFILE,
+    user_id: uid,
+    email: email || "",
+    full_name: fullName || (email ? email.split("@")[0] : "NutriLens Member")
+  };
+  const cached = getSavedUserProfile(uid) || fallbackProf;
+  setActiveUserId(uid);
+  setSavedUserProfile(cached);
+  if (token) setAuthToken(token);
+
+  return {
+    success: true,
+    user_id: uid,
+    email: email || "",
+    full_name: fullName || cached.full_name || "NutriLens Member",
+    token: token || "nutrilens_session_active",
+    message: "Local session initialized",
+    profile: cached
+  };
 };
 
 export const analyzeLabel = async (requestData: AnalyzeRequest): Promise<AnalyzeResponse> => {
@@ -637,8 +724,7 @@ export const analyzeBarcodeImage = async (
 
 export const getUserStats = async (userId: string = "default_user"): Promise<UserStatsResponse> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/user/stats?user_id=${userId}`);
+    const response = await apiFetch(`/user/stats?user_id=${encodeURIComponent(userId)}`, { method: "GET" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
   } catch (error) {
@@ -649,8 +735,7 @@ export const getUserStats = async (userId: string = "default_user"): Promise<Use
 
 export const getScanHistory = async (userId: string = "default_user", limit: number = 20): Promise<ScanHistoryItem[]> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/history?user_id=${userId}`);
+    const response = await apiFetch(`/history?user_id=${encodeURIComponent(userId)}&limit=${limit}`, { method: "GET" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data: ScanHistoryItem[] = await response.json();
     return data.slice(0, limit);
@@ -662,8 +747,7 @@ export const getScanHistory = async (userId: string = "default_user", limit: num
 
 export const getScanDetails = async (scanId: string): Promise<ScanHistoryItem> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/history/${scanId}`);
+    const response = await apiFetch(`/history/${encodeURIComponent(scanId)}`, { method: "GET" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
   } catch (error) {
@@ -674,8 +758,7 @@ export const getScanDetails = async (scanId: string): Promise<ScanHistoryItem> =
 
 export const deleteScanItem = async (scanId: string): Promise<void> => {
   try {
-    const url = getApiBaseUrl();
-    const response = await fetch(`${url}/history/${scanId}`, {
+    const response = await apiFetch(`/history/${encodeURIComponent(scanId)}`, {
       method: "DELETE",
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);

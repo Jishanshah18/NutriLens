@@ -12,6 +12,7 @@
     "expo-linking": "^57.0.3",
     "expo-router": "^57.0.6",
     "expo-status-bar": "~57.0.1",
+    "firebase": "^13.0.0",
     "nativewind": "^4.2.6",
     "react": "19.2.3",
     "react-dom": "^19.2.3",

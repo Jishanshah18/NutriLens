@@ -18,13 +18,28 @@ import { useAuth } from "../lib/AuthContext";
 export default function LoginScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
-  const { login, resetPassword, isLoading } = useAuth();
+  const {
+    login,
+    loginWithGoogle,
+    resetPassword,
+    resendEmailVerification,
+    firebaseUser,
+    isEmailVerified,
+    isFirebaseReady,
+    isLoading
+  } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
+
+  // Email verification resend state
+  const [resendingVerification, setResendingVerification] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
 
   // Forgot Password modal state
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -33,27 +48,61 @@ export default function LoginScreen() {
   const [forgotMessage, setForgotMessage] = useState<string | null>(null);
   const [forgotError, setForgotError] = useState<string | null>(null);
 
+  const validateEmail = (val: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+  };
+
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      setErrorMessage("Please enter both email and password.");
+    if (submitting || googleSubmitting) return;
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setErrorMessage("Please enter your email address.");
+      return;
+    }
+    if (!validateEmail(cleanEmail)) {
+      setErrorMessage("Please enter a valid email address (e.g. name@example.com).");
+      return;
+    }
+    if (!password) {
+      setErrorMessage("Please enter your password.");
       return;
     }
 
     setSubmitting(true);
     setErrorMessage(null);
+    setSuccessNotice(null);
 
     try {
-      await login(email.trim(), password.trim());
+      await login(cleanEmail, password);
       router.replace("/");
     } catch (err: any) {
-      setErrorMessage(err.message || "Invalid credentials. Please try again.");
+      setErrorMessage(err.message || "Failed to sign in. Please verify your credentials.");
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleGoogleLogin = async () => {
+    if (submitting || googleSubmitting) return;
+
+    setGoogleSubmitting(true);
+    setErrorMessage(null);
+    setSuccessNotice(null);
+
+    try {
+      await loginWithGoogle();
+      router.replace("/");
+    } catch (err: any) {
+      setErrorMessage(err.message || "Google sign-in could not be completed.");
+    } finally {
+      setGoogleSubmitting(false);
+    }
+  };
+
   const handleResetPassword = async () => {
-    if (!forgotEmail.trim() || !forgotEmail.includes("@")) {
+    const cleanForgotEmail = forgotEmail.trim();
+    if (!cleanForgotEmail || !validateEmail(cleanForgotEmail)) {
       setForgotError("Please enter a valid email address.");
       return;
     }
@@ -63,12 +112,26 @@ export default function LoginScreen() {
     setForgotMessage(null);
 
     try {
-      await resetPassword(forgotEmail.trim());
-      setForgotMessage("Password reset email sent! Check your inbox.");
+      await resetPassword(cleanForgotEmail);
+      setForgotMessage(`Password reset link sent to ${cleanForgotEmail}. Please check your inbox.`);
     } catch (err: any) {
       setForgotError(err.message || "Failed to send reset email. Please try again.");
     } finally {
       setForgotSubmitting(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (resendingVerification) return;
+    setResendingVerification(true);
+    try {
+      await resendEmailVerification();
+      setVerificationSent(true);
+      setTimeout(() => setVerificationSent(false), 5000);
+    } catch (err: any) {
+      setErrorMessage(err.message || "Could not resend verification email.");
+    } finally {
+      setResendingVerification(false);
     }
   };
 
@@ -81,17 +144,24 @@ export default function LoginScreen() {
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{
-            paddingHorizontal: 24,
-            paddingTop: Platform.OS === "web" ? 32 : 16,
-            paddingBottom: 50,
-            maxWidth: 520,
+            paddingHorizontal: 20,
+            paddingTop: Platform.OS === "web" ? 36 : 16,
+            paddingBottom: 48,
+            maxWidth: 480,
             width: "100%",
             alignSelf: "center"
           }}
           keyboardShouldPersistTaps="handled"
         >
           {/* Top Bar Navigation */}
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 20
+            }}
+          >
             <TouchableOpacity
               onPress={() => router.replace("/")}
               style={{
@@ -99,7 +169,7 @@ export default function LoginScreen() {
                 alignItems: "center",
                 backgroundColor: colors.cardAlt,
                 paddingHorizontal: 12,
-                paddingVertical: 6,
+                paddingVertical: 7,
                 borderRadius: 12,
                 borderWidth: 1,
                 borderColor: colors.border
@@ -110,106 +180,290 @@ export default function LoginScreen() {
 
             <TouchableOpacity
               onPress={() => router.push("/signup")}
-              style={{ padding: 4 }}
+              style={{
+                backgroundColor: `${colors.emerald}15`,
+                borderColor: `${colors.emerald}40`,
+                borderWidth: 1,
+                paddingHorizontal: 12,
+                paddingVertical: 7,
+                borderRadius: 12
+              }}
             >
-              <Text style={{ color: colors.emerald, fontSize: 13, fontWeight: "700" }}>Create Account</Text>
+              <Text style={{ color: colors.emerald, fontSize: 13, fontWeight: "800" }}>
+                Create Account
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Hero Branding */}
-          <View style={{ alignItems: "center", marginBottom: 32 }}>
+          {/* Hero Branding Header */}
+          <View style={{ alignItems: "center", marginBottom: 28 }}>
             <View
               style={{
-                width: 64,
-                height: 64,
-                borderRadius: 32,
-                backgroundColor: `${colors.emerald}20`,
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                backgroundColor: `${colors.emerald}18`,
                 borderWidth: 2,
                 borderColor: colors.emerald,
                 alignItems: "center",
                 justifyContent: "center",
-                marginBottom: 16,
+                marginBottom: 14,
                 shadowColor: colors.emerald,
                 shadowOffset: { width: 0, height: 6 },
                 shadowOpacity: 0.35,
-                shadowRadius: 12,
+                shadowRadius: 14,
                 elevation: 6
               }}
             >
-              <Text style={{ fontSize: 30 }}>🔍</Text>
+              <Text style={{ fontSize: 34 }}>🥗</Text>
+            </View>
+
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text
+                style={{
+                  fontSize: 28,
+                  fontWeight: "900",
+                  color: colors.text,
+                  letterSpacing: -0.6
+                }}
+              >
+                NutriLens
+              </Text>
+              <View
+                style={{
+                  backgroundColor: colors.emerald,
+                  paddingHorizontal: 7,
+                  paddingVertical: 2,
+                  borderRadius: 6
+                }}
+              >
+                <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "900", letterSpacing: 0.5 }}>
+                  AI
+                </Text>
+              </View>
             </View>
 
             <Text
               style={{
-                fontSize: 28,
-                fontWeight: "900",
-                color: colors.text,
-                letterSpacing: -0.5,
+                fontSize: 14,
+                fontWeight: "600",
+                color: colors.emerald,
+                marginTop: 6,
                 textAlign: "center"
               }}
             >
-              Welcome to NutriLens
+              Your personal nutrition intelligence companion.
             </Text>
+
             <Text
               style={{
-                fontSize: 14,
+                fontSize: 12,
                 color: colors.textMuted,
-                marginTop: 6,
+                marginTop: 4,
                 textAlign: "center",
-                lineHeight: 20
+                lineHeight: 18
               }}
             >
-              Sign in to access your personalized scans and nutritional radar.
+              Sign in with Firebase to access ingredient scans, allergen warnings & clinical radars.
             </Text>
           </View>
 
-          {/* Login Form Container */}
+          {/* Unverified Email Warning Banner (if user logged in but unverified) */}
+          {firebaseUser && !isEmailVerified && (
+            <View
+              style={{
+                backgroundColor: `${colors.amber}18`,
+                borderColor: `${colors.amber}60`,
+                borderWidth: 1,
+                borderRadius: 16,
+                padding: 14,
+                marginBottom: 18,
+                gap: 8
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ fontSize: 16 }}>✉️</Text>
+                <Text style={{ color: colors.amber, fontSize: 13, fontWeight: "800", flex: 1 }}>
+                  Email Verification Pending
+                </Text>
+              </View>
+              <Text style={{ color: colors.textMuted, fontSize: 12, lineHeight: 17 }}>
+                A verification link was sent to {firebaseUser.email}. Please verify your email to unlock all scanning features.
+              </Text>
+              <TouchableOpacity
+                onPress={handleResendVerification}
+                disabled={resendingVerification}
+                style={{
+                  alignSelf: "flex-start",
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 10,
+                  marginTop: 4
+                }}
+              >
+                {resendingVerification ? (
+                  <ActivityIndicator size="small" color={colors.amber} />
+                ) : (
+                  <Text style={{ color: colors.amber, fontSize: 12, fontWeight: "800" }}>
+                    {verificationSent ? "✓ Link Sent!" : "Resend Verification Email"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Main Login Card */}
           <View
             style={{
               backgroundColor: colors.card,
               borderRadius: 24,
               borderWidth: 1,
               borderColor: colors.border,
-              padding: 22,
+              padding: 24,
               shadowColor: "#000",
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.12,
-              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+              shadowOpacity: isDark ? 0.35 : 0.08,
+              shadowRadius: 16,
               elevation: 4,
               gap: 18
             }}
           >
-            {/* Error Notification */}
+            {/* Error Message Box */}
             {errorMessage && (
               <View
                 style={{
-                  backgroundColor: `${colors.crimson}18`,
+                  backgroundColor: `${colors.crimson}15`,
                   borderColor: `${colors.crimson}50`,
                   borderWidth: 1,
                   borderRadius: 14,
                   padding: 12,
                   flexDirection: "row",
                   alignItems: "center",
-                  gap: 8
+                  gap: 10
                 }}
               >
                 <Text style={{ fontSize: 16 }}>⚠️</Text>
-                <Text style={{ color: colors.crimson, fontSize: 13, fontWeight: "700", flex: 1 }}>
+                <Text
+                  style={{
+                    color: colors.crimson,
+                    fontSize: 13,
+                    fontWeight: "700",
+                    flex: 1,
+                    lineHeight: 18
+                  }}
+                >
                   {errorMessage}
                 </Text>
               </View>
             )}
 
-            {/* Email Field */}
+            {/* Success Notice */}
+            {successNotice && (
+              <View
+                style={{
+                  backgroundColor: `${colors.emerald}15`,
+                  borderColor: `${colors.emerald}50`,
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  padding: 12,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10
+                }}
+              >
+                <Text style={{ fontSize: 16 }}>✓</Text>
+                <Text style={{ color: colors.emerald, fontSize: 13, fontWeight: "700", flex: 1 }}>
+                  {successNotice}
+                </Text>
+              </View>
+            )}
+
+            {/* GOOGLE SIGN-IN BUTTON */}
+            <TouchableOpacity
+              onPress={handleGoogleLogin}
+              disabled={submitting || googleSubmitting || isLoading}
+              activeOpacity={0.85}
+              style={{
+                backgroundColor: colors.cardAlt,
+                borderColor: colors.border,
+                borderWidth: 1.5,
+                borderRadius: 16,
+                paddingVertical: 13,
+                paddingHorizontal: 16,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 12,
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.05,
+                shadowRadius: 4,
+                elevation: 1
+              }}
+            >
+              {googleSubmitting ? (
+                <ActivityIndicator size="small" color={colors.emerald} />
+              ) : (
+                <>
+                  {/* Google 'G' stylized badge */}
+                  <View
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      backgroundColor: "#FFF",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderWidth: 1,
+                      borderColor: "#E2E8F0"
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: "900", color: "#4285F4" }}>G</Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontSize: 14,
+                      fontWeight: "800",
+                      letterSpacing: 0.2
+                    }}
+                  >
+                    Continue with Google
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {/* OR DIVIDER */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 2 }}>
+              <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: colors.textDim,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.8
+                }}
+              >
+                or sign in with email
+              </Text>
+              <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+            </View>
+
+            {/* EMAIL INPUT */}
             <View>
               <Text
                 style={{
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: "800",
                   color: colors.text,
                   marginBottom: 6,
                   textTransform: "uppercase",
-                  letterSpacing: 0.5
+                  letterSpacing: 0.6
                 }}
               >
                 Email Address
@@ -233,27 +487,38 @@ export default function LoginScreen() {
                   paddingHorizontal: 16,
                   paddingVertical: 12,
                   color: colors.text,
-                  fontSize: 15
+                  fontSize: 14,
+                  fontWeight: "500"
                 }}
               />
             </View>
 
-            {/* Password Field */}
+            {/* PASSWORD INPUT */}
             <View>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 6
+                }}
+              >
                 <Text
                   style={{
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: "800",
                     color: colors.text,
                     textTransform: "uppercase",
-                    letterSpacing: 0.5
+                    letterSpacing: 0.6
                   }}
                 >
                   Password
                 </Text>
-                <TouchableOpacity onPress={() => setShowPassword((prev) => !prev)}>
-                  <Text style={{ fontSize: 12, color: colors.emerald, fontWeight: "700" }}>
+                <TouchableOpacity
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={{ fontSize: 11, color: colors.emerald, fontWeight: "700" }}>
                     {showPassword ? "Hide" : "Show"}
                   </Text>
                 </TouchableOpacity>
@@ -279,7 +544,8 @@ export default function LoginScreen() {
                     paddingVertical: 12,
                     paddingRight: 48,
                     color: colors.text,
-                    fontSize: 15
+                    fontSize: 14,
+                    fontWeight: "500"
                   }}
                 />
                 <TouchableOpacity
@@ -291,29 +557,32 @@ export default function LoginScreen() {
                     padding: 4
                   }}
                 >
-                  <Text style={{ fontSize: 16 }}>{showPassword ? "👁️" : "🙈"}</Text>
+                  <Text style={{ fontSize: 15 }}>{showPassword ? "👁️" : "🙈"}</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* Forgot Password Link */}
-            <View style={{ alignItems: "flex-end" }}>
-              <TouchableOpacity onPress={() => {
-                setForgotEmail(email);
-                setForgotMessage(null);
-                setForgotError(null);
-                setShowForgotModal(true);
-              }}>
-                <Text style={{ fontSize: 12, fontWeight: "700", color: colors.emerald }}>
+            {/* FORGOT PASSWORD LINK */}
+            <View style={{ alignItems: "flex-end", marginTop: -6 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setForgotEmail(email);
+                  setForgotMessage(null);
+                  setForgotError(null);
+                  setShowForgotModal(true);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: "800", color: colors.emerald }}>
                   Forgot Password?
                 </Text>
               </TouchableOpacity>
             </View>
 
-            {/* Log In Button */}
+            {/* PROMINENT GREEN SIGN IN BUTTON */}
             <TouchableOpacity
               onPress={handleLogin}
-              disabled={submitting || isLoading}
+              disabled={submitting || googleSubmitting || isLoading}
               activeOpacity={0.85}
               style={{
                 backgroundColor: colors.emerald,
@@ -321,10 +590,10 @@ export default function LoginScreen() {
                 borderRadius: 16,
                 alignItems: "center",
                 justifyContent: "center",
-                marginTop: 4,
+                marginTop: 2,
                 shadowColor: colors.emerald,
                 shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.4,
+                shadowOpacity: 0.35,
                 shadowRadius: 10,
                 elevation: 4
               }}
@@ -345,8 +614,15 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Switch to Sign Up */}
-            <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", marginTop: 4 }}>
+            {/* SWITCH TO SIGN UP */}
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "center",
+                alignItems: "center",
+                marginTop: 4
+              }}
+            >
               <Text style={{ fontSize: 13, color: colors.textMuted }}>
                 Don't have an account yet?{" "}
               </Text>
@@ -357,67 +633,104 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Security & Data Notice */}
+          <Text
+            style={{
+              fontSize: 11,
+              color: colors.textDim,
+              textAlign: "center",
+              marginTop: 24,
+              lineHeight: 16
+            }}
+          >
+            🔒 Protected with Firebase Authentication & encrypted session tokens.
+            Scan history and health condition radar profiles are securely preserved.
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Forgot Password Modal */}
+      {/* FORGOT PASSWORD MODAL */}
       <Modal
         visible={showForgotModal}
         transparent
         animationType="fade"
         onRequestClose={() => setShowForgotModal(false)}
       >
-        <View style={{
-          flex: 1,
-          backgroundColor: "rgba(0,0,0,0.6)",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 20
-        }}>
-          <View style={{
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-            borderWidth: 1,
-            borderRadius: 24,
-            padding: 24,
-            maxWidth: 420,
-            width: "100%",
-            gap: 16
-          }}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.65)",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              borderWidth: 1,
+              borderRadius: 24,
+              padding: 24,
+              maxWidth: 420,
+              width: "100%",
+              gap: 16,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.25,
+              shadowRadius: 20,
+              elevation: 8
+            }}
+          >
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>
-                Reset Password
-              </Text>
-              <TouchableOpacity onPress={() => setShowForgotModal(false)}>
-                <Text style={{ fontSize: 16, color: colors.textMuted }}>✕</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ fontSize: 20 }}>🔑</Text>
+                <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>
+                  Reset Password
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowForgotModal(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={{ fontSize: 18, color: colors.textMuted, fontWeight: "700" }}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={{ fontSize: 13, color: colors.textMuted, lineHeight: 18 }}>
-              Enter the email address associated with your NutriLens account. We will send a secure link to reset your password.
+            <Text style={{ fontSize: 13, color: colors.textMuted, lineHeight: 19 }}>
+              Enter the email address registered with NutriLens. Firebase will send a secure link to reset your password.
             </Text>
 
             {forgotError && (
-              <View style={{
-                backgroundColor: `${colors.crimson}18`,
-                borderColor: `${colors.crimson}50`,
-                borderWidth: 1,
-                borderRadius: 12,
-                padding: 10
-              }}>
-                <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "700" }}>{forgotError}</Text>
+              <View
+                style={{
+                  backgroundColor: `${colors.crimson}15`,
+                  borderColor: `${colors.crimson}50`,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 10
+                }}
+              >
+                <Text style={{ color: colors.crimson, fontSize: 12, fontWeight: "700" }}>
+                  {forgotError}
+                </Text>
               </View>
             )}
 
             {forgotMessage && (
-              <View style={{
-                backgroundColor: `${colors.emerald}18`,
-                borderColor: `${colors.emerald}50`,
-                borderWidth: 1,
-                borderRadius: 12,
-                padding: 10
-              }}>
-                <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "700" }}>{forgotMessage}</Text>
+              <View
+                style={{
+                  backgroundColor: `${colors.emerald}15`,
+                  borderColor: `${colors.emerald}50`,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  padding: 10
+                }}
+              >
+                <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "700" }}>
+                  {forgotMessage}
+                </Text>
               </View>
             )}
 
@@ -434,7 +747,7 @@ export default function LoginScreen() {
                 borderWidth: 1,
                 borderRadius: 14,
                 paddingHorizontal: 14,
-                paddingVertical: 10,
+                paddingVertical: 11,
                 color: colors.text,
                 fontSize: 14
               }}
@@ -448,10 +761,14 @@ export default function LoginScreen() {
                   paddingVertical: 12,
                   borderRadius: 14,
                   backgroundColor: colors.cardAlt,
+                  borderWidth: 1,
+                  borderColor: colors.border,
                   alignItems: "center"
                 }}
               >
-                <Text style={{ color: colors.textMuted, fontWeight: "700", fontSize: 13 }}>Cancel</Text>
+                <Text style={{ color: colors.textMuted, fontWeight: "700", fontSize: 13 }}>
+                  Cancel
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -468,7 +785,9 @@ export default function LoginScreen() {
                 {forgotSubmitting ? (
                   <ActivityIndicator color="#FFF" size="small" />
                 ) : (
-                  <Text style={{ color: "#FFF", fontWeight: "800", fontSize: 13 }}>Send Link</Text>
+                  <Text style={{ color: "#FFF", fontWeight: "900", fontSize: 13 }}>
+                    Send Reset Link
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>

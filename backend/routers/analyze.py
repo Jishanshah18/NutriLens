@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Header
 import base64
 from typing import List, Optional
 from models.schemas import (
@@ -11,6 +11,7 @@ from models.schemas import (
 )
 from services.model_service import analyze_ingredients, analyze_label_image, extract_text_from_image_base64
 from services.history_service import save_scan_history
+from services.auth_service import verify_firebase_id_token
 
 router = APIRouter(tags=["Analyze"])
 
@@ -34,7 +35,10 @@ async def extract_ocr_endpoint(request: OcrExtractRequest):
 
 
 @router.post("/analyze-label", response_model=AnalyzeResponse)
-async def analyze_label_endpoint(request: AnalyzeRequest):
+async def analyze_label_endpoint(
+    request: AnalyzeRequest,
+    authorization: Optional[str] = Header(None)
+):
     """
     Analyze food ingredients text using custom trained machine learning model against user preferences, allergies, and health goals.
     """
@@ -43,6 +47,11 @@ async def analyze_label_endpoint(request: AnalyzeRequest):
         # Only save valid food scans to history for authenticated users
         if response.is_food:
             user_id = request.user_profile.user_id if request.user_profile and request.user_profile.user_id else None
+            if authorization and authorization.startswith("Bearer "):
+                token = authorization[7:].strip()
+                verified = verify_firebase_id_token(token)
+                if verified and verified.get("uid"):
+                    user_id = verified["uid"]
             if user_id and user_id not in ["guest", ""]:
                 save_scan_history(response, request.ocr_text, user_id=user_id)
         return response
@@ -51,7 +60,10 @@ async def analyze_label_endpoint(request: AnalyzeRequest):
 
 
 @router.post("/analyze-image", response_model=AnalyzeResponse)
-async def analyze_image_endpoint(request: AnalyzeImageRequest):
+async def analyze_image_endpoint(
+    request: AnalyzeImageRequest,
+    authorization: Optional[str] = Header(None)
+):
     """
     Analyze a food product ingredient label directly from an image using on-device processing and custom trained ML models.
     """
@@ -60,6 +72,11 @@ async def analyze_image_endpoint(request: AnalyzeImageRequest):
         # Only save valid food scans to history for authenticated users
         if response.is_food:
             user_id = request.user_profile.user_id if request.user_profile and request.user_profile.user_id else None
+            if authorization and authorization.startswith("Bearer "):
+                token = authorization[7:].strip()
+                verified = verify_firebase_id_token(token)
+                if verified and verified.get("uid"):
+                    user_id = verified["uid"]
             if user_id and user_id not in ["guest", ""]:
                 saved_text = response.ocr_text if response.ocr_text else "Image Scan"
                 save_scan_history(response, saved_text, user_id=user_id)

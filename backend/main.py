@@ -90,8 +90,8 @@ for dev_o in dev_origins:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",  # Safely allow Vercel production and preview domains
+    allow_origins=["*"],
+    allow_origin_regex=r".*",  # Allow all localhost, LAN IPs, Vercel, and cloud origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -21,6 +21,7 @@ import {
   analyzeBarcodeImage,
   extractOcrText,
   lookupBarcode,
+  getApiBaseUrl,
   getActiveUserId,
   getSavedUserProfile,
   getUserProfile,
@@ -549,7 +550,7 @@ export default function ScannerScreen() {
         rawMsg.includes("network")
       ) {
         setScanError(
-          "Backend connection failed. Please ensure the NutriLens server is running on http://127.0.0.1:8000."
+          `Backend connection failed. Please ensure your cloud backend (${getApiBaseUrl()}) is online or check your network connection.`
         );
       } else {
         setScanError(
