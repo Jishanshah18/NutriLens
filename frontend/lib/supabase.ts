@@ -2,11 +2,11 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl =
   process.env.EXPO_PUBLIC_SUPABASE_URL ||
-  "https://llbithcfnwzgwubfuhfb.supabase.co";
+  "https://placeholder-project.supabase.co";
 
 const supabaseAnonKey =
   process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
-  "sb_publishable_N-nO07iLpQAHtpwAj0oVqQ_K7yKQ0O8";
+  "placeholder-anon-key";
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

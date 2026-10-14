@@ -15,13 +15,13 @@ import {
 
 // Public Firebase Client Configuration for NutriLens (nutrilens-13ad2)
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "AIzaSyCTBUn6wM4WzXkvK0EryHeY0vL76MkHhq8",
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "nutrilens-13ad2.firebaseapp.com",
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "nutrilens-13ad2",
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "nutrilens-13ad2.firebasestorage.app",
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "781410208219",
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:781410208219:web:7dc96a1fa5f6102912bffe",
-  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-HRV1BG3V7V"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "",
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "nutrilens.firebaseapp.com",
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "nutrilens",
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "nutrilens.appspot.com",
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "",
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || ""
 };
 
 // Check if developer has replaced placeholder credentials with real Firebase keys
@@ -37,7 +37,7 @@ export const isFirebaseConfigured = (): boolean => {
 };
 
 // Initialize Firebase App singleton
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig.apiKey ? firebaseConfig : { ...firebaseConfig, apiKey: "dummy-key-placeholder" });
 
 // Initialize Auth
 export const auth = getAuth(app);
