@@ -8,6 +8,8 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   updateProfile as updateFirebaseProfile,
   onAuthStateChanged,
   FirebaseUser,
@@ -197,11 +199,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let isMounted = true;
 
+    // Listen to Firebase auth state changes
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (isMounted) {
         handleFirebaseUser(user);
       }
     });
+
+    // Check for redirect result from Google OAuth redirect flow
+    if (typeof window !== "undefined") {
+      getRedirectResult(auth)
+        .then((cred) => {
+          if (cred?.user && isMounted) {
+            handleFirebaseUser(cred.user);
+          }
+        })
+        .catch((e) => {
+          console.warn("Notice checking Google redirect result:", e);
+        });
+    }
 
     return () => {
       isMounted = false;
@@ -497,10 +513,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Google Sign-In with Firebase (with seamless local fallback for localhost environments)
+  // Google Sign-In with Firebase (supports Popup and automatic Redirect fallback)
   const loginWithGoogle = async (): Promise<UserAuthResponse> => {
     setIsLoading(true);
     try {
-      const cred = await signInWithPopup(auth, googleProvider);
+      let cred: any = null;
+      try {
+        cred = await signInWithPopup(auth, googleProvider);
+      } catch (popupErr: any) {
+        // If popup is blocked by browser, seamlessly use native OAuth redirect
+        if (popupErr.code === "auth/popup-blocked" && typeof window !== "undefined") {
+          await signInWithRedirect(auth, googleProvider);
+          return {
+            success: true,
+            user_id: "redirecting",
+            email: "",
+            full_name: "Redirecting to Google...",
+            token: "redirecting",
+            message: "Redirecting to Google Sign-In...",
+            profile: DEFAULT_USER_PROFILE
+          };
+        }
+        throw popupErr;
+      }
+
       const user = cred.user;
       const idToken = await user.getIdToken();
       const uid = user.uid;
@@ -522,35 +558,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profile: resolved
       };
     } catch (err: any) {
-      console.warn("Google auth note, initializing verified local Google session:", err);
-      // Fallback: If Google Sign-In popup or API key is restricted on localhost,
-      // create/login with verified Google demo account so user can continue without getting stuck!
-      const demoUid = "google_user_" + (typeof window !== "undefined" ? window.location.hostname.replace(/\W/g, '') : "web");
-      const googleProf: UserProfile = {
-        user_id: demoUid,
-        email: "member@nutrilens.ai",
-        full_name: "Google Member",
-        age: 26,
-        health_conditions: ["Diabetes", "High Blood Pressure"],
-        dietary_preferences: ["Low Sugar"],
-        allergies: [],
-        health_goals: ["Blood Sugar Management", "Heart Health"]
-      };
-      setActiveUserId(demoUid);
-      setSavedUserProfile(googleProf);
-      setUserIdState(demoUid);
-      setUserProfile(googleProf);
-      setTokenState("nutrilens_google_token");
-      setIsEmailVerified(true);
-      return {
-        success: true,
-        user_id: demoUid,
-        email: "member@nutrilens.ai",
-        full_name: "Google Member",
-        token: "nutrilens_google_token",
-        message: "Google sign-in active",
-        profile: googleProf
-      };
+      console.error("Google sign-in error:", err);
+      const friendlyMsg = getFriendlyFirebaseErrorMessage(err);
+      throw new Error(friendlyMsg);
     } finally {
       setIsLoading(false);
     }

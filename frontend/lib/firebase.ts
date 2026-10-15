@@ -8,6 +8,8 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   updateProfile,
   onAuthStateChanged,
   User as FirebaseUser
@@ -82,8 +84,8 @@ export const getFriendlyFirebaseErrorMessage = (error: any): string => {
       return "Google sign-in request was cancelled.";
     case "auth/popup-blocked":
       return "Google sign-in popup was blocked by your browser. Please allow popups for NutriLens.";
-    case "auth/operation-not-allowed":
-      return "This sign-in method is not enabled in Firebase Console. Please enable Email/Password or Google provider.";
+    case "auth/unauthorized-domain":
+      return "This domain is not authorized for Google Sign-In. Please add your domain to Firebase Console > Authentication > Settings > Authorized domains.";
     case "auth/requires-recent-login":
       return "For security, please log out and sign in again before making this change.";
     default:
@@ -96,7 +98,7 @@ export const getFriendlyFirebaseErrorMessage = (error: any): string => {
         fullText.includes("api_key") ||
         fullText.includes("api key")
       ) {
-        return "Connecting with verified local session...";
+        return "Firebase API Key restricted or not configured for this domain.";
       }
       return rawMsg.replace(/^Firebase:\s*/i, "").trim() || "Authentication request failed. Please try again.";
   }
@@ -110,6 +112,8 @@ export {
   sendPasswordResetEmail,
   sendEmailVerification,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   updateProfile,
   onAuthStateChanged
 };
