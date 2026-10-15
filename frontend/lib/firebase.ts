@@ -84,8 +84,10 @@ export const getFriendlyFirebaseErrorMessage = (error: any): string => {
       return "Google sign-in request was cancelled.";
     case "auth/popup-blocked":
       return "Google sign-in popup was blocked by your browser. Please allow popups for NutriLens.";
-    case "auth/unauthorized-domain":
-      return "This domain is not authorized for Google Sign-In. Please add your domain to Firebase Console > Authentication > Settings > Authorized domains.";
+    case "auth/unauthorized-domain": {
+      const currentHost = typeof window !== "undefined" ? window.location.hostname : "your domain";
+      return `This domain "${currentHost}" is not in Firebase Authorized Domains. Add "${currentHost}" (without https://) to Firebase Console > Authentication > Settings > Authorized domains.`;
+    }
     case "auth/requires-recent-login":
       return "For security, please log out and sign in again before making this change.";
     default:
