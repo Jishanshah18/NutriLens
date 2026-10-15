@@ -65,7 +65,7 @@ export const getFriendlyFirebaseErrorMessage = (error: any): string => {
       return "An account with this email address already exists. Please log in instead.";
     case "auth/invalid-credential":
     case "auth/wrong-password":
-      return "Incorrect email or password. Please verify your details and try again.";
+      return "Incorrect password. (Note: If this account was created using 'Sign in with Google', please click the Google button above).";
     case "auth/user-not-found":
       return "No account was found with this email. Please check your spelling or sign up.";
     case "auth/invalid-email":

@@ -243,7 +243,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Firebase Email/Password Login
   const login = async (email: string, password: string): Promise<UserAuthResponse> => {
     setIsLoading(true);
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
 
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
@@ -384,7 +384,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Firebase Email/Password Sign Up with Email Verification
   const register = async (params: RegisterParams): Promise<UserAuthResponse> => {
     setIsLoading(true);
-    const cleanEmail = params.email.trim();
+    const cleanEmail = params.email.trim().toLowerCase();
     const cleanName = params.fullName.trim();
 
     try {
