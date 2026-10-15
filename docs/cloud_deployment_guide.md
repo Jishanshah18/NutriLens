@@ -16,8 +16,8 @@ This guide details how to deploy both the **NutriLens FastAPI Backend** and **Nu
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 6. Add Environment Variables:
-   - `SUPABASE_URL`: `https://your-project.supabase.co`
-   - `SUPABASE_KEY`: `your_supabase_anon_key_here`
+   - `SUPABASE_URL`: `https://llbithcfnwzgwubfuhfb.supabase.co`
+   - `SUPABASE_KEY`: `sb_publishable_N-nO07iLpQAHtpwAj0oVqQ_K7yKQ0O8`
 7. Click **Create Web Service**.
 8. Note your public backend URL (e.g. `https://nutrilens-backend.onrender.com`).
 

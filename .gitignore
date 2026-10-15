@@ -53,20 +53,6 @@ Thumbs.db
 .idea/
 .claude/
 
-# Environment Variables & Secrets
-.env
-*.env
-.env.*
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-backend/.env
-frontend/.env
-!*.env.example
-!*.env.template
-
 FINAL FOOD DATASET/
-
 
 

@@ -92,8 +92,8 @@ EXPO_PUBLIC_FIREBASE_APP_ID=1:your_sender_id:web:your_app_id
 EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID=G-XXXXXXXXXX
 
 # Supabase Cloud Database (Preserves scan history & user profiles)
-EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+EXPO_PUBLIC_SUPABASE_URL=https://llbithcfnwzgwubfuhfb.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_N-nO07iLpQAHtpwAj0oVqQ_K7yKQ0O8
 ```
 
 ### Backend: `backend/.env`
@@ -101,8 +101,8 @@ Add your Firebase Project ID for backend token verification:
 
 ```env
 FIREBASE_PROJECT_ID=your-project-id
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your_supabase_anon_key_here
+SUPABASE_URL=https://llbithcfnwzgwubfuhfb.supabase.co
+SUPABASE_KEY=sb_publishable_N-nO07iLpQAHtpwAj0oVqQ_K7yKQ0O8
 ALLOWED_ORIGINS=http://localhost:8081,https://nutrilens.vercel.app
 ```
 

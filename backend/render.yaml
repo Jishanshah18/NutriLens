@@ -9,8 +9,6 @@ services:
       - key: PYTHON_VERSION
         value: 3.10.12
       - key: SUPABASE_URL
-        sync: false
+        value: https://llbithcfnwzgwubfuhfb.supabase.co
       - key: SUPABASE_KEY
-        sync: false
-      - key: FIREBASE_PROJECT_ID
-        sync: false
+        value: sb_publishable_N-nO07iLpQAHtpwAj0oVqQ_K7yKQ0O8
