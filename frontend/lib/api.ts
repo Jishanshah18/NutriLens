@@ -288,20 +288,27 @@ const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
 const RENDER_CLOUD_URL = "https://nutrilens-jfiv.onrender.com/api";
 
 // Candidate backend URLs in priority order:
-// 1. Explicitly configured EXPO_PUBLIC_API_URL
-// 2. Production Render Cloud Backend (https://nutrilens-jfiv.onrender.com/api)
-// 3. Localhost fallbacks (http://127.0.0.1:8000/api)
-const CANDIDATE_BASE_URLS: string[] = [
-  CONFIGURED_API_URL,
-  RENDER_CLOUD_URL,
-  "http://127.0.0.1:8000/api",
-  "http://localhost:8000/api"
-].filter(Boolean) as string[];
+// In localhost/dev environment: prioritize local backend (0 latency) then cloud failover
+// In production web/mobile: prioritize configured URL and cloud
+const CANDIDATE_BASE_URLS: string[] = isLocalhostEnv
+  ? [
+      "http://127.0.0.1:8000/api",
+      "http://localhost:8000/api",
+      CONFIGURED_API_URL,
+      RENDER_CLOUD_URL
+    ].filter(Boolean) as string[]
+  : [
+      CONFIGURED_API_URL,
+      RENDER_CLOUD_URL,
+      "http://127.0.0.1:8000/api",
+      "http://localhost:8000/api"
+    ].filter(Boolean) as string[];
 
 let _cachedWorkingUrl: string | null = null;
 
 export const getApiBaseUrl = (): string => {
   if (_cachedWorkingUrl) return _cachedWorkingUrl;
+  if (isLocalhostEnv) return "http://127.0.0.1:8000/api";
   if (CONFIGURED_API_URL) return CONFIGURED_API_URL;
   return RENDER_CLOUD_URL;
 };
@@ -409,8 +416,7 @@ export const registerUser = async (
   allergies: string[] = [],
   healthGoals: string[] = []
 ): Promise<UserAuthResponse> => {
-  const url = getApiBaseUrl();
-  const response = await fetch(`${url}/user/register`, {
+  const response = await apiFetch("/user/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -438,8 +444,7 @@ export const registerUser = async (
 };
 
 export const loginUser = async (email: string, password: string): Promise<UserAuthResponse> => {
-  const url = getApiBaseUrl();
-  const response = await fetch(`${url}/user/login`, {
+  const response = await apiFetch("/user/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password })

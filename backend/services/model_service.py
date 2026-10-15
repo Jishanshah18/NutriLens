@@ -1349,62 +1349,39 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             t1, s1 = _run_engine(img)
             if s1 > best_score:
                 best_text, best_score = t1, s1
-                # Early return if strong text extracted (avoids 4 extra passes)
-                if best_score >= 14 or len(best_text.split()) >= 7:
+                # Fast early return if readable words extracted (avoids heavy redundant CV passes)
+                if best_score >= 6 or len(best_text.split()) >= 3:
                     import gc; gc.collect()
                     return best_text
 
-            # Pass 2: Unsharp Mask for sharpening blurry packaging text
-            unsharp = img.filter(ImageFilter.UnsharpMask(radius=2.0, percent=180, threshold=2))
-            t2, s2 = _run_engine(unsharp)
-            del unsharp
-            if s2 > best_score:
-                best_text, best_score = t2, s2
-                if best_score >= 14:
-                    import gc; gc.collect()
-                    return best_text
-
-            # Pass 3: CLAHE adaptive contrast (uneven lighting, glossy wrappers)
-            try:
-                gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-                clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-                clahe_arr = clahe.apply(gray_cv)
-                gray_clahe = Image.fromarray(clahe_arr)
-                del gray_cv, clahe, clahe_arr
-                t3, s3 = _run_engine(gray_clahe)
-                del gray_clahe
-                if s3 > best_score:
-                    best_text, best_score = t3, s3
-                    if best_score >= 14:
-                        import gc; gc.collect()
-                        return best_text
-            except Exception:
-                pass
-
-            # Pass 4: Inverted (white text on dark packaging)
-            if best_score < 10:
+            # Pass 2: CLAHE adaptive contrast (only if Pass 1 had weak/sparse text)
+            if best_score < 6:
                 try:
-                    inverted = ImageOps.invert(img.convert("RGB"))
-                    t4, s4 = _run_engine(inverted)
-                    del inverted
-                    if s4 > best_score:
-                        best_text, best_score = t4, s4
-                        if best_score >= 14:
+                    gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+                    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+                    clahe_arr = clahe.apply(gray_cv)
+                    gray_clahe = Image.fromarray(clahe_arr)
+                    del gray_cv, clahe, clahe_arr
+                    t2, s2 = _run_engine(gray_clahe)
+                    del gray_clahe
+                    if s2 > best_score:
+                        best_text, best_score = t2, s2
+                        if best_score >= 6 or len(best_text.split()) >= 3:
                             import gc; gc.collect()
                             return best_text
                 except Exception:
                     pass
 
-            # Pass 5: 90° and 270° rotations ONLY if score is very low (< 5)
-            if best_score < 5:
-                for angle in (90, 270):
-                    rotated = img.rotate(angle, expand=True)
+            # Pass 3: Fast 90° rotation check ONLY if zero text was detected
+            if best_score < 2 and not best_text.strip():
+                try:
+                    rotated = img.rotate(90, expand=True)
                     tr, sr = _run_engine(rotated)
                     del rotated
                     if sr > best_score:
                         best_text, best_score = tr, sr
-                        if best_score >= 12:
-                            break
+                except Exception:
+                    pass
 
             if best_text and len(best_text.split()) >= 1:
                 import gc; gc.collect()

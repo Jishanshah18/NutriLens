@@ -39,7 +39,7 @@ const POPULAR_GOALS = [
 export default function SignUpScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
-  const { register, loginWithGoogle, isLoading } = useAuth();
+  const { register, loginWithGoogle, loginAsGuest, isLoading } = useAuth();
 
   // Form Fields
   const [fullName, setFullName] = useState("");
@@ -61,6 +61,7 @@ export default function SignUpScreen() {
   // Submission State
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [signupSuccess, setSignupSuccess] = useState(false);
 
@@ -92,8 +93,22 @@ export default function SignUpScreen() {
     );
   };
 
+  const handleGuestSignup = async () => {
+    if (submitting || googleSubmitting || guestSubmitting) return;
+    setGuestSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await loginAsGuest(selectedConditions);
+      router.replace("/");
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to initialize guest profile.");
+    } finally {
+      setGuestSubmitting(false);
+    }
+  };
+
   const handleRegister = async () => {
-    if (submitting || googleSubmitting) return;
+    if (submitting || googleSubmitting || guestSubmitting) return;
 
     const cleanName = fullName.trim();
     const cleanEmail = email.trim();
@@ -138,10 +153,9 @@ export default function SignUpScreen() {
         dietaryPreferences: selectedGoals
       });
       setSignupSuccess(true);
-      // Wait briefly so user sees email verification notice, then enter app
       setTimeout(() => {
         router.replace("/");
-      }, 2400);
+      }, 600);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to create account. Please try again.");
     } finally {
@@ -150,14 +164,14 @@ export default function SignUpScreen() {
   };
 
   const handleGoogleSignup = async () => {
-    if (submitting || googleSubmitting) return;
+    if (submitting || googleSubmitting || guestSubmitting) return;
     setGoogleSubmitting(true);
     setErrorMessage(null);
     try {
       await loginWithGoogle();
       router.replace("/");
     } catch (err: any) {
-      setErrorMessage(err.message || "Google registration failed.");
+      setErrorMessage(err.message || "Google registration could not be completed.");
     } finally {
       setGoogleSubmitting(false);
     }
@@ -305,10 +319,52 @@ export default function SignUpScreen() {
               gap: 20
             }}
           >
+            {/* 1-TAP INSTANT ACCESS / GUEST SIGN UP */}
+            <TouchableOpacity
+              onPress={handleGuestSignup}
+              disabled={submitting || googleSubmitting || guestSubmitting || isLoading}
+              activeOpacity={0.85}
+              style={{
+                backgroundColor: `${colors.emerald}18`,
+                borderColor: colors.emerald,
+                borderWidth: 1.5,
+                borderRadius: 16,
+                paddingVertical: 13,
+                paddingHorizontal: 16,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                shadowColor: colors.emerald,
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.15,
+                shadowRadius: 6,
+                elevation: 2
+              }}
+            >
+              {guestSubmitting ? (
+                <ActivityIndicator size="small" color={colors.emerald} />
+              ) : (
+                <>
+                  <Text style={{ fontSize: 16 }}>⚡</Text>
+                  <Text
+                    style={{
+                      color: colors.emerald,
+                      fontSize: 14,
+                      fontWeight: "900",
+                      letterSpacing: 0.2
+                    }}
+                  >
+                    Instant Access / Continue as Guest
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
             {/* Quick Google Sign-Up Button */}
             <TouchableOpacity
               onPress={handleGoogleSignup}
-              disabled={submitting || googleSubmitting || isLoading}
+              disabled={submitting || googleSubmitting || guestSubmitting || isLoading}
               activeOpacity={0.85}
               style={{
                 backgroundColor: colors.cardAlt,

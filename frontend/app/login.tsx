@@ -21,6 +21,7 @@ export default function LoginScreen() {
   const {
     login,
     loginWithGoogle,
+    loginAsGuest,
     resetPassword,
     resendEmailVerification,
     firebaseUser,
@@ -34,6 +35,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
@@ -52,8 +54,22 @@ export default function LoginScreen() {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
   };
 
+  const handleGuestLogin = async () => {
+    if (submitting || googleSubmitting || guestSubmitting) return;
+    setGuestSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await loginAsGuest(["Diabetes", "High Blood Pressure"]);
+      router.replace("/");
+    } catch (err: any) {
+      setErrorMessage(err.message || "Guest session could not be initialized.");
+    } finally {
+      setGuestSubmitting(false);
+    }
+  };
+
   const handleLogin = async () => {
-    if (submitting || googleSubmitting) return;
+    if (submitting || googleSubmitting || guestSubmitting) return;
 
     const cleanEmail = email.trim();
     if (!cleanEmail) {
@@ -84,7 +100,7 @@ export default function LoginScreen() {
   };
 
   const handleGoogleLogin = async () => {
-    if (submitting || googleSubmitting) return;
+    if (submitting || googleSubmitting || guestSubmitting) return;
 
     setGoogleSubmitting(true);
     setErrorMessage(null);
@@ -381,10 +397,52 @@ export default function LoginScreen() {
               </View>
             )}
 
+            {/* INSTANT DEMO / GUEST ACCESS BUTTON */}
+            <TouchableOpacity
+              onPress={handleGuestLogin}
+              disabled={submitting || googleSubmitting || guestSubmitting || isLoading}
+              activeOpacity={0.85}
+              style={{
+                backgroundColor: `${colors.emerald}18`,
+                borderColor: colors.emerald,
+                borderWidth: 1.5,
+                borderRadius: 16,
+                paddingVertical: 13,
+                paddingHorizontal: 16,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                shadowColor: colors.emerald,
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.15,
+                shadowRadius: 6,
+                elevation: 2
+              }}
+            >
+              {guestSubmitting ? (
+                <ActivityIndicator size="small" color={colors.emerald} />
+              ) : (
+                <>
+                  <Text style={{ fontSize: 16 }}>⚡</Text>
+                  <Text
+                    style={{
+                      color: colors.emerald,
+                      fontSize: 14,
+                      fontWeight: "900",
+                      letterSpacing: 0.2
+                    }}
+                  >
+                    Instant Access / Continue as Guest
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
             {/* GOOGLE SIGN-IN BUTTON */}
             <TouchableOpacity
               onPress={handleGoogleLogin}
-              disabled={submitting || googleSubmitting || isLoading}
+              disabled={submitting || googleSubmitting || guestSubmitting || isLoading}
               activeOpacity={0.85}
               style={{
                 backgroundColor: colors.cardAlt,

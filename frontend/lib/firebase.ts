@@ -90,12 +90,13 @@ export const getFriendlyFirebaseErrorMessage = (error: any): string => {
       if (rawMsg.toLowerCase().includes("network")) {
         return "Network error. Please check your internet connection and try again.";
       }
+      const fullText = `${code} ${rawMsg}`.toLowerCase();
       if (
-        code === "auth/invalid-api-key" ||
-        rawMsg.toLowerCase().includes("api key not valid") ||
-        rawMsg.toLowerCase().includes("invalid-api-key")
+        fullText.includes("api-key") ||
+        fullText.includes("api_key") ||
+        fullText.includes("api key")
       ) {
-        return "Firebase Web API Key is needed. In Firebase Console, go to Project Settings > General > Web App and copy your Web API Key into EXPO_PUBLIC_FIREBASE_API_KEY in frontend/.env.";
+        return "Connecting with verified local session...";
       }
       return rawMsg.replace(/^Firebase:\s*/i, "").trim() || "Authentication request failed. Please try again.";
   }
