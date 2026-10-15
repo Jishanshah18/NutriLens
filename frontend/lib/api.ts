@@ -570,14 +570,22 @@ export const syncFirebaseUserWithBackend = async (
 
     if (response.ok) {
       const data = await response.json();
+      const resolvedEmail = email || data.email || "";
+      const resolvedName = fullName || data.full_name || "NutriLens Member";
+      const resolvedProfile = {
+        ...(data.profile || DEFAULT_USER_PROFILE),
+        user_id: data.user_id || uid,
+        email: resolvedEmail,
+        full_name: resolvedName
+      };
       const authResponse: UserAuthResponse = {
         success: true,
         user_id: data.user_id || uid,
-        email: data.email || email || "",
-        full_name: data.full_name || fullName || "NutriLens Member",
+        email: resolvedEmail,
+        full_name: resolvedName,
         token: token || "nutrilens_session_active",
         message: "Synced successfully",
-        profile: data.profile || { ...DEFAULT_USER_PROFILE, user_id: uid, email: email || "", full_name: fullName || "NutriLens Member" }
+        profile: resolvedProfile
       };
       setActiveUserId(authResponse.user_id);
       setSavedUserProfile(authResponse.profile);

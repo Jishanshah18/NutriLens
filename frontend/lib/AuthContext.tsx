@@ -156,6 +156,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Fast optimistic UI restore from local cache
       const cached = getSavedUserProfile(uid);
       if (cached) {
+        if (email) {
+          cached.email = email;
+          cached.full_name = fullName || cached.full_name;
+        }
         setUserProfile(cached);
       }
 
@@ -164,21 +168,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const syncRes = await syncFirebaseUserWithBackend(uid, email, fullName, idToken);
         if (syncRes && syncRes.profile) {
           let resolvedProfile = syncRes.profile;
+          if (email) {
+            resolvedProfile.email = email;
+          }
+          if (fullName) {
+            resolvedProfile.full_name = fullName;
+          }
 
           // Merge with any Supabase cloud preferences
           resolvedProfile = await syncSupabaseProfile(uid, resolvedProfile);
+          if (email) {
+            resolvedProfile.email = email;
+          }
+          if (fullName) {
+            resolvedProfile.full_name = fullName;
+          }
 
           setUserProfile(resolvedProfile);
           setSavedUserProfile(resolvedProfile);
         }
       } catch (beErr) {
         console.warn("Backend sync notice:", beErr);
-        // Fallback default profile if backend is starting up
-        const baseProf: UserProfile = cached || {
-          ...DEFAULT_USER_PROFILE,
+        const baseProf: UserProfile = {
+          ...(cached || DEFAULT_USER_PROFILE),
           user_id: uid,
-          email,
-          full_name: fullName
+          email: email || (cached && cached.email) || "",
+          full_name: fullName || (cached && cached.full_name) || "NutriLens Member"
         };
         setUserProfile(baseProf);
         setSavedUserProfile(baseProf);
@@ -545,7 +560,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Sync identity with backend persistent database
       const syncRes = await syncFirebaseUserWithBackend(uid, email, fullName, idToken);
-      const resolved = await syncSupabaseProfile(uid, syncRes.profile);
+      let resolved = await syncSupabaseProfile(uid, syncRes.profile);
+      if (email) {
+        resolved.email = email;
+      }
+      if (fullName) {
+        resolved.full_name = fullName;
+      }
 
       setUserProfile(resolved);
       setSavedUserProfile(resolved);
@@ -555,6 +576,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return {
         ...syncRes,
+        email: email || syncRes.email,
+        full_name: fullName || syncRes.full_name,
         profile: resolved
       };
     } catch (err: any) {

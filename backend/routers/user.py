@@ -70,13 +70,16 @@ async def sync_firebase_user(
 
         if authorization and authorization.startswith("Bearer "):
             token = authorization[7:].strip()
-            verified = verify_firebase_id_token(token)
-            if verified and verified.get("uid"):
-                uid = verified["uid"]
-                if not email:
-                    email = verified.get("email")
-                if not full_name:
-                    full_name = verified.get("name")
+            # Only override if it's a real verified Firebase token (not a dev/mock session placeholder)
+            if token and token != "nutrilens_session_active" and not token.startswith("demo_"):
+                verified = verify_firebase_id_token(token)
+                if verified and not verified.get("is_mock"):
+                    if not uid or verified.get("uid"):
+                        uid = verified.get("uid") or uid
+                    if not email or verified.get("email"):
+                        email = verified.get("email") or email
+                    if not full_name or verified.get("name"):
+                        full_name = verified.get("name") or full_name
 
         if not uid:
             raise HTTPException(status_code=400, detail="Missing user uid")
@@ -85,8 +88,8 @@ async def sync_firebase_user(
         return {
             "success": True,
             "user_id": prof.user_id,
-            "email": prof.email,
-            "full_name": prof.full_name,
+            "email": prof.email or email or "",
+            "full_name": prof.full_name or full_name or "NutriLens Member",
             "profile": prof.model_dump()
         }
     except HTTPException:

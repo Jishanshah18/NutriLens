@@ -163,7 +163,13 @@ def resolve_and_preserve_user_identity(
     # 1. Check if profile already exists for this exact Firebase uid
     existing = db_store.profiles.get(uid)
     if existing:
-        return UserProfile(**existing)
+        prof = UserProfile(**existing)
+        if clean_email and (not prof.email or "nutrilens.ai" in prof.email or prof.email != clean_email):
+            prof.email = clean_email
+            if full_name:
+                prof.full_name = full_name
+            db_store.save_profile(prof.model_dump())
+        return prof
 
     # Check Supabase cloud for exact uid
     if supabase:
