@@ -765,36 +765,65 @@ export default function ResultsScreen() {
               </View>
             )}
 
-            {data.healthier_alternatives && data.healthier_alternatives.map((alt, idx) => (
-              <View
-                key={idx}
-                style={{
-                  backgroundColor: colors.cardAlt,
-                  padding: 14,
-                  borderRadius: 16,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center"
-                }}
-              >
-                <View style={{ flex: 1, paddingRight: 10 }}>
-                  <Text style={{ fontSize: 14, fontWeight: "800", color: colors.text }}>{alt.name}</Text>
-                  <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{alt.reason}</Text>
+            {data.healthier_alternatives && data.healthier_alternatives.map((alt, idx) => {
+              const isNoSwapNotice = alt.name.toLowerCase().includes("no suitable swap") || alt.estimated_health_score <= 0;
+
+              if (isNoSwapNotice) {
+                return (
+                  <View
+                    key={idx}
+                    style={{
+                      backgroundColor: colors.cardAlt,
+                      padding: 14,
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      alignItems: "center"
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textMuted, textAlign: "center" }}>
+                      🌿 {alt.name}
+                    </Text>
+                    {alt.reason ? (
+                      <Text style={{ fontSize: 11, color: colors.textDim, marginTop: 4, textAlign: "center", lineHeight: 16 }}>
+                        {alt.reason}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              }
+
+              return (
+                <View
+                  key={idx}
+                  style={{
+                    backgroundColor: colors.cardAlt,
+                    padding: 14,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}
+                >
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={{ fontSize: 14, fontWeight: "800", color: colors.text }}>{alt.name}</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{alt.reason}</Text>
+                  </View>
+                  <View style={{
+                    backgroundColor: "rgba(16, 185, 129, 0.15)",
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: 12
+                  }}>
+                    <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "900" }}>
+                      {alt.estimated_health_score}/100
+                    </Text>
+                  </View>
                 </View>
-                <View style={{
-                  backgroundColor: "rgba(16, 185, 129, 0.15)",
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  borderRadius: 12
-                }}>
-                  <Text style={{ color: colors.emerald, fontSize: 12, fontWeight: "900" }}>
-                    {alt.estimated_health_score}/100
-                  </Text>
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
 

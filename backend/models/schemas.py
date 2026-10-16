@@ -182,3 +182,34 @@ class UserAuthResponse(BaseModel):
     message: str
     profile: UserProfile
 
+class WeeklyDayData(BaseModel):
+    day: str
+    date: str
+    score: int
+    scans: int
+
+class WeeklyReportResponse(BaseModel):
+    user_id: str
+    is_demo: bool = False
+    has_data: bool = False
+    weekly_avg: Optional[int] = None
+    total_scans: int = 0
+    days: List[WeeklyDayData] = Field(default_factory=list)
+    message: str = ""
+
+class NutritionInsightsResponse(BaseModel):
+    user_id: str
+    is_demo: bool = False
+    has_data: bool = False
+    total_scans: int = 0
+    clean_diet_ratio: Optional[int] = None
+    upf_ratio: Optional[int] = None
+    avg_purity_score: Optional[int] = None
+    hazards_avoided_count: int = 0
+    sugar_today_g: float = 0.0
+    sodium_today_mg: float = 0.0
+    protein_today_g: float = 0.0
+    clean_brands: List[Dict[str, Any]] = Field(default_factory=list)
+    watchlist_brands: List[Dict[str, Any]] = Field(default_factory=list)
+    summary_message: str = ""
+

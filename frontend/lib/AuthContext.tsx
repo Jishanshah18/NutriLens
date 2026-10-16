@@ -25,6 +25,9 @@ import {
   getSavedUserProfile,
   setSavedUserProfile,
   setAuthToken,
+  getAuthToken,
+  isDemoMode,
+  setDemoMode,
   clearAuthSession,
   updateUserProfile as syncBackendProfile,
   syncFirebaseUserWithBackend,
@@ -50,6 +53,7 @@ interface AuthContextType {
   userId: string;
   token: string | null;
   isAuthenticated: boolean;
+  isDemoMode: boolean;
   isLoading: boolean;
   isEmailVerified: boolean;
   firebaseUser: FirebaseUser | null;
@@ -71,6 +75,7 @@ const AuthContext = createContext<AuthContextType>({
   userId: "",
   token: null,
   isAuthenticated: false,
+  isDemoMode: false,
   isLoading: true,
   isEmailVerified: false,
   firebaseUser: null,
@@ -88,11 +93,33 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [userId, setUserIdState] = useState<string>("");
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [token, setTokenState] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState<boolean>(() => isDemoMode());
+  const [userId, setUserIdState] = useState<string>(() => {
+    if (isDemoMode()) return "demo_user";
+    return getActiveUserId() || "";
+  });
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
+    if (isDemoMode()) {
+      return getSavedUserProfile("demo_user") || {
+        user_id: "demo_user",
+        email: "demo@nutrilens.ai",
+        full_name: "Demo Health Seeker",
+        age: 28,
+        health_conditions: ["Diabetes"],
+        dietary_preferences: ["Low Sugar"],
+        allergies: [],
+        health_goals: ["Blood Sugar Management", "Heart Health"]
+      };
+    }
+    const active = getActiveUserId();
+    return active ? getSavedUserProfile(active) : null;
+  });
+  const [token, setTokenState] = useState<string | null>(() => {
+    if (isDemoMode()) return "nutrilens_demo_active";
+    return getAuthToken();
+  });
   const [firebaseUser, setFirebaseUserState] = useState<FirebaseUser | null>(null);
-  const [isEmailVerified, setIsEmailVerified] = useState<boolean>(false);
+  const [isEmailVerified, setIsEmailVerified] = useState<boolean>(() => isDemoMode());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const isFirebaseReady = isFirebaseConfigured();
 
@@ -134,6 +161,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Synchronize authenticated Firebase session with local cache, backend SQLite, and Supabase
   const handleFirebaseUser = useCallback(async (user: FirebaseUser | null) => {
     if (user) {
+      // Real authenticated Firebase user
+      setDemoMode(false);
+      setIsDemo(false);
       const uid = user.uid;
       const email = user.email || "";
       const fullName = user.displayName || email.split("@")[0] || "NutriLens Member";
@@ -199,13 +229,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSavedUserProfile(baseProf);
       }
     } else {
-      // Unauthenticated state
-      setUserIdState("");
-      setFirebaseUserState(null);
-      setIsEmailVerified(false);
-      setUserProfile(null);
-      setTokenState(null);
-      clearAuthSession();
+      // Firebase has no active session. Check if demo mode or valid local user is active.
+      if (isDemoMode()) {
+        const guestUid = "demo_user";
+        const guestProf: UserProfile = getSavedUserProfile(guestUid) || {
+          user_id: guestUid,
+          email: "demo@nutrilens.ai",
+          full_name: "Demo Health Seeker",
+          age: 28,
+          health_conditions: ["Diabetes"],
+          dietary_preferences: ["Low Sugar"],
+          allergies: [],
+          health_goals: ["Blood Sugar Management", "Heart Health"]
+        };
+        setUserIdState(guestUid);
+        setUserProfile(guestProf);
+        setTokenState("nutrilens_demo_active");
+        setIsDemo(true);
+        setIsEmailVerified(true);
+      } else {
+        const activeLocalId = getActiveUserId();
+        const activeToken = getAuthToken();
+        if (activeLocalId && activeToken && !isDemoMode() && activeLocalId !== "demo_user" && activeLocalId !== "default_user") {
+          const cached = getSavedUserProfile(activeLocalId);
+          if (cached) {
+            setUserIdState(activeLocalId);
+            setUserProfile(cached);
+            setTokenState(activeToken);
+            setIsDemo(false);
+            setIsEmailVerified(true);
+            setIsLoading(false);
+            return;
+          }
+        }
+        // Unauthenticated state
+        setUserIdState("");
+        setFirebaseUserState(null);
+        setIsEmailVerified(false);
+        setUserProfile(null);
+        setTokenState(null);
+        setIsDemo(false);
+        setDemoMode(false);
+        clearAuthSession();
+      }
     }
     setIsLoading(false);
   }, []);
@@ -266,6 +332,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setTokenState(idToken);
       setIsEmailVerified(user.emailVerified);
 
+      setDemoMode(false);
+      setIsDemo(false);
       return {
         ...syncRes,
         profile: resolved
@@ -281,6 +349,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUserIdState(beRes.user_id);
           setTokenState(beRes.token || "nutrilens_local_token");
           setIsEmailVerified(true);
+          setDemoMode(false);
+          setIsDemo(false);
           return {
             ...beRes,
             profile: resolved
@@ -306,6 +376,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUserIdState(regRes.user_id);
             setTokenState(regRes.token || "nutrilens_local_token");
             setIsEmailVerified(true);
+            setDemoMode(false);
+            setIsDemo(false);
             return regRes;
           }
         } catch (regErr) {}
@@ -327,6 +399,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUserProfile(fallbackProf);
         setTokenState("nutrilens_local_token");
         setIsEmailVerified(true);
+        setDemoMode(false);
+        setIsDemo(false);
         return {
           success: true,
           user_id: localUid,
@@ -348,6 +422,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Instant Guest / Demo Login (No Firebase or password required)
   const loginAsGuest = async (conditions: string[] = ["Diabetes"]): Promise<UserAuthResponse> => {
     setIsLoading(true);
+    setDemoMode(true);
+    setIsDemo(true);
     const guestUid = "demo_user";
     const guestProf: UserProfile = {
       user_id: guestUid,
@@ -457,6 +533,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSavedUserProfile(newProf);
       setAuthToken(idToken);
 
+      setDemoMode(false);
+      setIsDemo(false);
       return {
         success: true,
         user_id: uid,
@@ -487,6 +565,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUserIdState(beRes.user_id);
           setTokenState(beRes.token || "nutrilens_local_token");
           setIsEmailVerified(true);
+          setDemoMode(false);
+          setIsDemo(false);
           return {
             ...beRes,
             profile: resolved
@@ -512,6 +592,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUserProfile(fallbackProf);
       setTokenState("nutrilens_local_token");
       setIsEmailVerified(true);
+      setDemoMode(false);
+      setIsDemo(false);
 
       return {
         success: true,
@@ -573,6 +655,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUserIdState(uid);
       setTokenState(idToken);
       setIsEmailVerified(user.emailVerified);
+      setDemoMode(false);
+      setIsDemo(false);
 
       return {
         ...syncRes,
@@ -606,6 +690,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       await signOut(auth).catch(() => {});
+      setDemoMode(false);
+      setIsDemo(false);
       clearAuthSession();
       setUserIdState("");
       setUserProfile(null);
@@ -721,6 +807,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         userId,
         token,
         isAuthenticated,
+        isDemoMode: isDemo,
         isLoading,
         isEmailVerified,
         firebaseUser,

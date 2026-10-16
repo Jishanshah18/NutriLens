@@ -52,15 +52,29 @@ def verify_firebase_id_token(id_token: str) -> Optional[Dict[str, Any]]:
     if not id_token:
         return None
 
-    # Support local development or mock sessions
-    if id_token == "nutrilens_session_active" or id_token.startswith("demo_token_"):
+    # Support demo sessions explicitly
+    if id_token in ["nutrilens_demo_active", "demo_token_active"] or id_token.startswith("demo_token_") or id_token == "demo":
         return {
-            "uid": "default_user",
-            "email": "jishan@nutrilens.ai",
-            "name": "Jishan Ahmed",
+            "uid": "demo_user",
+            "email": "demo@nutrilens.ai",
+            "name": "Demo Health Seeker",
             "email_verified": True,
-            "is_mock": True
+            "is_mock": True,
+            "is_demo": True
         }
+
+    # Support local user tokens with embedded user id
+    if id_token.startswith("local_token_"):
+        uid = id_token.replace("local_token_", "").strip()
+        if uid:
+            return {
+                "uid": uid,
+                "email": "",
+                "name": "",
+                "email_verified": True,
+                "is_mock": False,
+                "is_demo": False
+            }
 
     try:
         # First decode header to find Key ID (kid) and algorithm
@@ -338,11 +352,12 @@ async def get_authenticated_user_context(
             "is_mock": verified.get("is_mock", False)
         }
 
-    # If unauthenticated, allow guest / default read operations with clear flag
+    # If unauthenticated, do not associate with any real or demo user
     return {
         "authenticated": False,
-        "user_id": "default_user",
+        "user_id": "",
         "email": "",
         "profile": None,
-        "is_mock": True
+        "is_mock": True,
+        "is_demo": False
     }

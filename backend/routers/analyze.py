@@ -90,7 +90,7 @@ async def analyze_image_endpoint(
 async def analyze_label_image_file_endpoint(
     image: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
-    user_id: Optional[str] = Form("default_user")
+    user_id: Optional[str] = Form(None)
 ):
     """
     Multipart/form-data image upload endpoint.
@@ -166,7 +166,7 @@ async def analyze_label_image_file_endpoint(
 
 
 @router.get("/barcode/{barcode}", response_model=AnalyzeResponse)
-async def analyze_barcode_endpoint(barcode: str, user_id: str = "default_user"):
+async def analyze_barcode_endpoint(barcode: str, user_id: str = ""):
     """
     Directly lookup and analyze a food product by its EAN/UPC/GTIN barcode.
     Evaluates real product nutritional values against user dietary preferences.

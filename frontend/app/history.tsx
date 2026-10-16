@@ -11,7 +11,7 @@ type FilterType = "all" | "clean" | "moderate" | "avoid" | "allergens";
 export default function HistoryScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { userId, isAuthenticated } = useAuth();
+  const { userId, isAuthenticated, isDemoMode } = useAuth();
 
   const handleSafeBack = () => {
     try {
@@ -33,17 +33,18 @@ export default function HistoryScreen() {
 
   useEffect(() => {
     loadHistory();
-  }, [userId]);
+  }, [userId, isDemoMode]);
 
   const loadHistory = async () => {
-    if (!userId) {
+    const targetId = isDemoMode ? "demo_user" : userId;
+    if (!targetId) {
       setHistory([]);
       setIsLoading(false);
       setIsRefreshing(false);
       return;
     }
     try {
-      const items = await getScanHistory(userId, 100);
+      const items = await getScanHistory(targetId, 100);
       setHistory(items);
     } catch (e) {
       console.warn("Notice loading scan history:", e);
@@ -326,9 +327,11 @@ export default function HistoryScreen() {
             alignItems: "center"
           }}>
             <Text style={{ fontSize: 40, marginBottom: 12 }}>🥑</Text>
-            <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text }}>No food scans yet</Text>
-            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 6, textAlign: "center", lineHeight: 18 }}>
-              Scan a food label to see your history here.
+            <Text style={{ fontSize: 18, fontWeight: "900", color: colors.text, textAlign: "center" }}>
+              Your scanned foods will appear here.
+            </Text>
+            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 6, textAlign: "center", lineHeight: 18, maxWidth: 300 }}>
+              Scan an ingredient label or package barcode to analyze health purity and food safety.
             </Text>
             <TouchableOpacity
               onPress={() => router.push("/scanner")}

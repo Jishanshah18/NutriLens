@@ -39,6 +39,7 @@ export default function ProfileScreen() {
   const {
     userProfile: authProfile,
     userId,
+    isDemoMode,
     logout,
     updateProfile,
     updatePassword,
@@ -104,15 +105,16 @@ export default function ProfileScreen() {
   }, [authProfile]);
 
   useEffect(() => {
-    if (userId) {
-      getUserStats(userId).then(setStats).catch(() => {});
+    const targetUid = isDemoMode ? "demo_user" : userId;
+    if (targetUid) {
+      getUserStats(targetUid, isDemoMode).then(setStats).catch(() => {});
     }
-  }, [userId]);
+  }, [userId, isDemoMode]);
 
   const handleLogout = async () => {
     try {
       await logout();
-      router.replace("/login");
+      router.replace("/");
     } catch (e) {
       console.warn("Error logging out:", e);
     }
@@ -320,6 +322,44 @@ export default function ProfileScreen() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 60, gap: 20 }}>
+        {/* DEMO INDICATOR BANNER */}
+        {isDemoMode && (
+          <View style={{
+            backgroundColor: `${colors.amber}18`,
+            borderColor: `${colors.amber}40`,
+            borderWidth: 1,
+            borderRadius: 16,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between"
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+              <Text style={{ fontSize: 18 }}>⚡</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 12, fontWeight: "900", color: colors.amber }}>
+                  DEMO PROFILE ACTIVE
+                </Text>
+                <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                  Sample dietary context • Sign up to save personal health profile
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push("/signup")}
+              style={{
+                backgroundColor: colors.emerald,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 10
+              }}
+            >
+              <Text style={{ color: "#FFF", fontSize: 11, fontWeight: "800" }}>Sign Up</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* User Account Card */}
         <View style={{
           backgroundColor: colors.card,

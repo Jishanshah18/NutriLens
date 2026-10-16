@@ -8,7 +8,7 @@ router = APIRouter(tags=["History"])
 
 @router.get("/history", response_model=List[ScanHistoryItem])
 async def fetch_history(
-    user_id: str = "default_user",
+    user_id: str = "",
     limit: int = Query(20, ge=1, le=100),
     authorization: Optional[str] = Header(None)
 ):
@@ -23,6 +23,8 @@ async def fetch_history(
             verified = verify_firebase_id_token(token)
             if verified and verified.get("uid"):
                 target_uid = verified["uid"]
+        if not target_uid:
+            return []
         return get_scan_history(user_id=target_uid, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -163,6 +163,16 @@ class PersistentStore:
                     "stats": (14, 3, 28, 450, 3)
                 },
                 {
+                    "id": "demo_user",
+                    "email": "demo@nutrilens.ai",
+                    "name": "Demo Health Seeker",
+                    "conditions": ["Diabetes", "High Blood Pressure"],
+                    "preferences": ["Low Sugar", "Diabetic-Friendly"],
+                    "allergies": ["Peanuts"],
+                    "goals": ["Blood Sugar Management", "Heart Health"],
+                    "stats": (14, 3, 28, 450, 3)
+                },
+                {
                     "id": "user_diabetes",
                     "email": "sarah.diabetes@nutrilens.ai",
                     "name": "Sarah Connor (Diabetes)",
@@ -249,21 +259,20 @@ class PersistentStore:
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (acct["id"], st[0], st[1], st[2], st[3], st[4], now_date))
 
-            # Do NOT seed fake scan history - user history must strictly contain only real scans
-
-            # Seed Badges if missing
-            cursor.execute("SELECT COUNT(*) FROM badges WHERE user_id = 'default_user'")
-            if cursor.fetchone()[0] == 0:
-                sample_badges = [
-                    ("b-1", "default_user", "Avocado Lover", "🥑", "Scanned 10 whole organic foods", 1, "2026-07-20"),
-                    ("b-2", "default_user", "Allergy Defender", "🛡️", "Avoided 5 conflicting allergen items", 1, "2026-07-25"),
-                    ("b-3", "default_user", "Nutrition Expert", "🏆", "Completed 15 daily health quizzes", 0, None),
-                    ("b-4", "default_user", "Streak Master", "🔥", "Maintained a 14-day daily scan streak", 1, "2026-08-05")
-                ]
-                cursor.executemany("""
-                    INSERT INTO badges (id, user_id, name, icon, description, unlocked, unlocked_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, sample_badges)
+            # Seed Badges for demo accounts if missing
+            for demo_uid in ["default_user", "demo_user"]:
+                cursor.execute("SELECT COUNT(*) FROM badges WHERE user_id = ?", (demo_uid,))
+                if cursor.fetchone()[0] == 0:
+                    sample_badges = [
+                        (f"b-1-{demo_uid}", demo_uid, "Avocado Lover", "🥑", "Scanned 10 whole organic foods", 1, "2026-07-20"),
+                        (f"b-2-{demo_uid}", demo_uid, "Allergy Defender", "🛡️", "Avoided 5 conflicting allergen items", 1, "2026-07-25"),
+                        (f"b-3-{demo_uid}", demo_uid, "Nutrition Expert", "🏆", "Completed 15 daily health quizzes", 0, None),
+                        (f"b-4-{demo_uid}", demo_uid, "Streak Master", "🔥", "Maintained a 14-day daily scan streak", 1, "2026-08-05")
+                    ]
+                    cursor.executemany("""
+                        INSERT INTO badges (id, user_id, name, icon, description, unlocked, unlocked_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, sample_badges)
 
             # Seed Quizzes if missing
             cursor.execute("SELECT COUNT(*) FROM quizzes")
@@ -467,7 +476,7 @@ class PersistentStore:
 
             cursor.execute("""
                 INSERT OR IGNORE INTO user_stats (user_id, current_streak, scans_today, total_scans, xp, level, last_active_date)
-                VALUES (?, 1, 0, 0, 100, 1, ?)
+                VALUES (?, 0, 0, 0, 0, 1, ?)
             """, (user_id, datetime.now(timezone.utc).strftime("%Y-%m-%d")))
 
             conn.commit()

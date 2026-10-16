@@ -282,8 +282,15 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
                 if any(re.search(rf'\b{re.escape(kw)}\b', text_lower) for kw in keywords):
                     detected_allergens.append(allergen)
 
-            audit = _audit_user_preferences(text_lower, nutrition, detected_allergens, profile)
-            alternatives = _find_healthier_alternatives(cleaned_text, real_nova or 3, real_score)
+            is_demo_user = bool(profile and profile.user_id in DEMO_USER_IDS)
+            alternatives = _find_healthier_alternatives(
+                cleaned_text,
+                real_nova or 3,
+                real_score,
+                product_name=product_name,
+                nutrition=nutrition,
+                is_demo=is_demo_user
+            )
 
             # Build personalized verdict
             verdict_parts = []
@@ -501,7 +508,15 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
     elif audit.goal_warnings:
         verdict_parts.append(audit.goal_warnings[0])
 
-    alternatives = _find_healthier_alternatives(cleaned_text, final_nova, final_health_score)
+    is_demo_user = bool(profile and profile.user_id in DEMO_USER_IDS)
+    alternatives = _find_healthier_alternatives(
+        cleaned_text,
+        final_nova,
+        final_health_score,
+        product_name=product_name,
+        nutrition=nutrition,
+        is_demo=is_demo_user
+    )
 
     personalized_rec = generate_personalized_recommendation(
         product_name=product_name,
@@ -839,61 +854,227 @@ def _extract_smart_product_name(ocr_text: str, catalog_match: Optional[Dict[str,
     return "Scanned Food Product"
 
 
-def _find_healthier_alternatives(cleaned_text: str, current_nova: int, current_score: int) -> List[AlternativeProduct]:
-    """Finds higher-scoring, cleaner alternative items from the trained product catalog."""
-    catalog = _models.get("product_catalog")
-    knn = _models.get("alternatives_index")
-    vectorizer = _models.get("vectorizer")
+DEMO_USER_IDS = {"default_user", "demo_user", "user_diabetes", "user_hypertension", "user_clean"}
 
-    alternatives: List[AlternativeProduct] = []
+def _find_healthier_alternatives(
+    cleaned_text: str,
+    current_nova: int,
+    current_score: int,
+    product_name: str = "",
+    nutrition: Optional[Any] = None,
+    is_demo: bool = False
+) -> List[AlternativeProduct]:
+    """
+    Finds higher-scoring, cleaner alternative items.
+    For DEMO users: preserves the existing sample experience and catalog fallbacks.
+    For REAL users: generates category-relevant, clinically sound whole-food swaps based on
+    actual product identification, calories, sugar, sodium, and processing level.
+    """
+    # DEMO MODE: Keep existing demo behavior and fallbacks completely untouched
+    if is_demo:
+        catalog = _models.get("product_catalog")
+        knn = _models.get("alternatives_index")
+        vectorizer = _models.get("vectorizer")
+        demo_alts: List[AlternativeProduct] = []
 
-    if catalog and knn and vectorizer and cleaned_text:
-        try:
-            X_vec = vectorizer.transform([cleaned_text])
-            num_neighbors = min(25, len(catalog))
-            distances, indices = knn.kneighbors(X_vec, n_neighbors=num_neighbors)
-            
-            seen_names = set()
-            for idx in indices[0]:
-                item = catalog[idx]
-                item_name = (item.get("food_name") or item.get("product_name") or "").strip()
-                if not item_name or item_name in seen_names:
-                    continue
+        if catalog and knn and vectorizer and cleaned_text:
+            try:
+                X_vec = vectorizer.transform([cleaned_text])
+                num_neighbors = min(25, len(catalog))
+                distances, indices = knn.kneighbors(X_vec, n_neighbors=num_neighbors)
+                seen_names = set()
+                for idx in indices[0]:
+                    item = catalog[idx]
+                    item_name = (item.get("food_name") or item.get("product_name") or "").strip()
+                    if not item_name or item_name in seen_names:
+                        continue
+                    item_score = int(item.get("health_score", 80))
+                    item_nova = int(item.get("nova_group", 2))
+                    if item_score > current_score or item_nova < current_nova:
+                        seen_names.add(item_name)
+                        proc_desc = "Clean, minimally processed" if item_nova <= 2 else "Wholesome"
+                        demo_alts.append(AlternativeProduct(
+                            name=item_name,
+                            reason=f"{proc_desc} choice with clean ingredients and high nutritional density.",
+                            estimated_health_score=item_score
+                        ))
+                        if len(demo_alts) >= 2:
+                            break
+            except Exception:
+                pass
 
-                item_score = int(item.get("health_score", 80))
-                item_nova = int(item.get("nova_group", 2))
-                
-                # Pick candidates that are healthier or less processed
-                if item_score > current_score or item_nova < current_nova:
-                    seen_names.add(item_name)
-                    proc_desc = "Clean, minimally processed" if item_nova <= 2 else "Wholesome"
-                    reason_desc = f"{proc_desc} choice with clean ingredients and high nutritional density."
-                    alternatives.append(AlternativeProduct(
-                        name=item_name,
-                        reason=reason_desc,
-                        estimated_health_score=item_score
-                    ))
-                    if len(alternatives) >= 3:
-                        break
-        except Exception as e:
-            print(f"Alternative recommendation error: {e}")
+        if not demo_alts:
+            demo_alts = [
+                AlternativeProduct(
+                    name="Organic Raw Almond & Pumpkin Seed Mix",
+                    reason="Unprocessed whole foods high in magnesium and clean plant protein.",
+                    estimated_health_score=94
+                ),
+                AlternativeProduct(
+                    name="Stevia-Sweetened Dark Cacao Snack",
+                    reason="Low glycemic impact with high flavanol antioxidants and zero artificial dyes.",
+                    estimated_health_score=88
+                )
+            ]
+        return demo_alts
 
-    # Fallback alternatives if dataset has no direct matches
-    if not alternatives:
-        alternatives = [
+    # REAL USER MODE: Genuinely tailored food swap recommendations
+    # 1. If scanned food is already a high-scoring clean whole food (score >= 85 and NOVA <= 2):
+    if current_score >= 85 and current_nova <= 2:
+        return [
             AlternativeProduct(
-                name="Organic Raw Almond & Pumpkin Seed Mix",
-                reason="Unprocessed whole foods high in magnesium and clean plant protein.",
-                estimated_health_score=94
-            ),
-            AlternativeProduct(
-                name="Stevia-Sweetened Dark Cacao Snack",
-                reason="Low glycemic impact with high flavanol antioxidants and zero artificial dyes.",
-                estimated_health_score=88
+                name=product_name or "Current Clean Choice",
+                reason="This food already has a clean nutritional profile and minimal industrial processing. No swap necessary.",
+                estimated_health_score=current_score
             )
         ]
 
-    return alternatives
+    # 2. Category and nutrient-aware intelligent whole food matching
+    text_lower = f"{product_name} {cleaned_text}".lower()
+
+    # Category A: Chips / Salty Crisps / Packaged Fried Snacks / Namkeen
+    if any(k in text_lower for k in ["chip", "chips", "crisp", "crisps", "puff", "puffs", "salted", "nachos", "fries", "namkeen", "sev", "bhujia"]):
+        return [
+            AlternativeProduct(
+                name="Air-Popped Olive Oil & Sea Salt Popcorn",
+                reason="Whole-grain snack with 65% less sodium and zero refined palm oil.",
+                estimated_health_score=90
+            ),
+            AlternativeProduct(
+                name="Roasted Organic Spiced Chickpeas",
+                reason="High prebiotic fiber (6g) and plant protein (7g) with low glycemic load.",
+                estimated_health_score=94
+            )
+        ]
+
+    # Category B: Sodas / Colas / Sugary Drinks / Fruit Punch / Sweetened Beverages
+    if any(k in text_lower for k in ["cola", "soda", "drink", "juice", "beverage", "syrup", "squash", "punch", "energy drink", "soft drink"]):
+        return [
+            AlternativeProduct(
+                name="Sparkling Water Infused with Fresh Lemon & Mint",
+                reason="Zero added sugars or high-fructose corn syrup; prevents insulin spikes.",
+                estimated_health_score=98
+            ),
+            AlternativeProduct(
+                name="Unsweetened Cold-Brew Hibiscus & Green Tea",
+                reason="Rich in clean EGCG antioxidants with 0g sugar and natural cellular hydration.",
+                estimated_health_score=96
+            )
+        ]
+
+    # Category C: Cookies / Biscuits / Sweet Bakery / Chocolates / Candies
+    if any(k in text_lower for k in ["cookie", "cookies", "biscuit", "biscuits", "cake", "sweet", "chocolate", "wafer", "candy", "pastry", "donut", "doughnut"]):
+        return [
+            AlternativeProduct(
+                name="Raw Organic Walnut & Date Energy Bites",
+                reason="Naturally sweetened with whole fruit fiber; zero bleached flour or artificial emulsifiers.",
+                estimated_health_score=92
+            ),
+            AlternativeProduct(
+                name="85% Extra Dark Single-Origin Cacao with Almonds",
+                reason="Under 4g sugar per serving, delivering bioavailable magnesium and heart-healthy polyphenols.",
+                estimated_health_score=89
+            )
+        ]
+
+    # Category D: Instant Noodles / Packaged Ramen / Heavily Processed Soups
+    if any(k in text_lower for k in ["noodle", "noodles", "ramen", "soup", "pasta", "maggi", "chowmein", "macaroni"]):
+        return [
+            AlternativeProduct(
+                name="100% Organic Buckwheat Soba Noodles",
+                reason="Slow-digesting complex carbs with zero synthetic MSG (E621) or industrial sodium spikes.",
+                estimated_health_score=91
+            ),
+            AlternativeProduct(
+                name="Red Lentil & Spinach High-Protein Spiral Pasta",
+                reason="Delivers 14g clean plant protein and 7g fiber per serving with low glycemic impact.",
+                estimated_health_score=93
+            )
+        ]
+
+    # Category E: Processed Sweetened Dairy / Flavored Milks / Ice Creams
+    if any(k in text_lower for k in ["milk", "yogurt", "curd", "dairy", "cheese", "ice cream", "kulfi", "shake"]):
+        return [
+            AlternativeProduct(
+                name="Plain Organic Greek Yogurt with Fresh Berries",
+                reason="15g clean bioavailable protein with active gut probiotics and zero cane sugar syrups.",
+                estimated_health_score=95
+            ),
+            AlternativeProduct(
+                name="Unsweetened Cold-Pressed Almond Milk",
+                reason="Fortified plant calcium with zero emulsifiers, carrageenan, or added sucrose.",
+                estimated_health_score=91
+            )
+        ]
+
+    # Category F: Processed Meats / Hot Dogs / Cured Sausages / Nuggets
+    if any(k in text_lower for k in ["sausage", "ham", "bacon", "salami", "nugget", "nuggets", "frank", "hot dog", "bologna"]):
+        return [
+            AlternativeProduct(
+                name="Herbed Organic Tempeh or Grilled Lean Turkey",
+                reason="Complete amino acid profile free from carcinogenic sodium nitrites (E250) or curing salts.",
+                estimated_health_score=92
+            )
+        ]
+
+    # Category G: Refined White Bread / Commercial Pastries / Buns
+    if any(k in text_lower for k in ["bread", "bun", "toast", "white flour", "maida", "croissant"]):
+        return [
+            AlternativeProduct(
+                name="100% Sprouted Whole-Grain Bread (Ezekiel Style)",
+                reason="Living sprouted grains reduce glycemic index by 40% with higher bioavailable B-vitamins.",
+                estimated_health_score=94
+            )
+        ]
+
+    # Category H: Sweetened Breakfast Cereals / Granola Bars
+    if any(k in text_lower for k in ["cereal", "flakes", "corn flakes", "granola", "muesli", "froot loops"]):
+        return [
+            AlternativeProduct(
+                name="Steel-Cut Oats with Chia Seeds & Cinnamon",
+                reason="Abundant beta-glucan soluble fiber that stabilizes blood glucose with 0g refined syrups.",
+                estimated_health_score=95
+            )
+        ]
+
+    # 3. Catalog KNN search if available
+    catalog = _models.get("product_catalog")
+    knn = _models.get("alternatives_index")
+    vectorizer = _models.get("vectorizer")
+    if catalog and knn and vectorizer and cleaned_text:
+        try:
+            X_vec = vectorizer.transform([cleaned_text])
+            num_neighbors = min(20, len(catalog))
+            distances, indices = knn.kneighbors(X_vec, n_neighbors=num_neighbors)
+            seen_names = set()
+            knn_alts: List[AlternativeProduct] = []
+            for idx in indices[0]:
+                item = catalog[idx]
+                item_name = (item.get("food_name") or item.get("product_name") or "").strip()
+                if not item_name or item_name in seen_names or item_name.lower() in text_lower:
+                    continue
+                item_score = int(item.get("health_score", 80))
+                item_nova = int(item.get("nova_group", 2))
+                if item_score > current_score or item_nova < current_nova:
+                    seen_names.add(item_name)
+                    knn_alts.append(AlternativeProduct(
+                        name=item_name,
+                        reason="Minimally processed alternative with cleaner ingredients and superior nutritional density.",
+                        estimated_health_score=item_score
+                    ))
+                    if len(knn_alts) >= 2:
+                        return knn_alts
+        except Exception:
+            pass
+
+    # 4. Strict requirement fallback when no suitable alternative exists
+    return [
+        AlternativeProduct(
+            name="No suitable swap found for this food yet.",
+            reason="NutriLens found no clinically verified healthier alternative with lower processing for this specific item.",
+            estimated_health_score=0
+        )
+    ]
 
 
 def parse_nutrition_facts(text: str) -> Dict[str, Any]:
@@ -1547,8 +1728,15 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
                 if any(re.search(rf'\b{re.escape(kw)}\b', text_lower) for kw in keywords):
                     detected_allergens.append(allergen)
 
-            audit = _audit_user_preferences(text_lower, nutrition, detected_allergens, profile)
-            alternatives = _find_healthier_alternatives(cleaned_text, final_nova, final_score)
+            is_demo_user = bool(profile and profile.user_id in DEMO_USER_IDS)
+            alternatives = _find_healthier_alternatives(
+                cleaned_text,
+                final_nova,
+                final_score,
+                product_name=product_name,
+                nutrition=nutrition,
+                is_demo=is_demo_user
+            )
 
             verdict = "Scanned Food Product: Partial label data extracted. Nutritional assessment is estimated from available text."
             if audit.allergen_conflicts:

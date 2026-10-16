@@ -71,8 +71,15 @@ def save_scan_history(analysis: AnalyzeResponse, ocr_text: str, user_id: str) ->
     # Save to SQLite local store
     db_store.save_scan(item_dict, user_id=user_id)
 
-    # Increment user scan stats
-    if user_id in db_store.user_stats:
+    # Update user scan stats
+    if user_id not in ["default_user", "demo_user", "user_diabetes", "user_hypertension", "user_clean"]:
+        try:
+            from services.user_service import calculate_real_user_stats
+            fresh_stats = calculate_real_user_stats(user_id)
+            db_store.update_user_stats(user_id, fresh_stats.model_dump())
+        except Exception as st_err:
+            print(f"Notice updating real user stats: {st_err}")
+    elif user_id in db_store.user_stats:
         db_store.user_stats[user_id]["total_scans"] += 1
         db_store.user_stats[user_id]["scans_today"] += 1
         db_store.user_stats[user_id]["xp"] += 20
@@ -98,7 +105,7 @@ def get_scan_history(user_id: str, limit: int = 20) -> List[ScanHistoryItem]:
                 .limit(limit)
                 .execute()
             )
-            if res.data is not None:
+            if res.data and len(res.data) > 0:
                 return [ScanHistoryItem(**item) for item in res.data]
         except Exception as e:
             print(f"Notice: Supabase scan history query: {e}")

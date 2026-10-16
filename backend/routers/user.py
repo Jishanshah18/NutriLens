@@ -6,7 +6,9 @@ from models.schemas import (
     UserLoginRequest,
     UserRegisterRequest,
     UserAuthResponse,
-    UserPasswordUpdateRequest
+    UserPasswordUpdateRequest,
+    WeeklyReportResponse,
+    NutritionInsightsResponse
 )
 from services.user_service import (
     get_user_profile,
@@ -15,7 +17,9 @@ from services.user_service import (
     register_new_user,
     authenticate_existing_user,
     list_all_users,
-    update_user_password
+    update_user_password,
+    get_weekly_report,
+    get_nutrition_insights
 )
 from services.auth_service import (
     verify_firebase_id_token,
@@ -155,7 +159,7 @@ async def modify_user_profile(
 
 @router.get("/user/stats", response_model=UserStatsResponse)
 async def fetch_user_stats(
-    user_id: str = "default_user",
+    user_id: str = "",
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -169,6 +173,50 @@ async def fetch_user_stats(
             if verified and verified.get("uid"):
                 target_uid = verified["uid"]
         return get_user_stats(target_uid)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/user/weekly-report", response_model=WeeklyReportResponse)
+async def fetch_weekly_report(
+    user_id: str = "",
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Retrieve weekly report for user.
+    For demo users: preserves existing sample 7-day data.
+    For real users: queries genuine scans for current week boundaries.
+    """
+    try:
+        target_uid = user_id
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization[7:].strip()
+            verified = verify_firebase_id_token(token)
+            if verified and verified.get("uid"):
+                target_uid = verified["uid"]
+        return get_weekly_report(target_uid)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/user/nutrition-insights", response_model=NutritionInsightsResponse)
+async def fetch_nutrition_insights(
+    user_id: str = "",
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Retrieve nutrition insights.
+    For demo users: preserves existing sample data (78% clean diet, 22% UPF, 84 purity, 14 hazards).
+    For real users: derives metrics strictly from genuine saved scan records.
+    """
+    try:
+        target_uid = user_id
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization[7:].strip()
+            verified = verify_firebase_id_token(token)
+            if verified and verified.get("uid"):
+                target_uid = verified["uid"]
+        return get_nutrition_insights(target_uid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

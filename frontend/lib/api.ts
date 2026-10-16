@@ -145,6 +145,40 @@ export interface QuizSubmitResponse {
   total_xp: number;
   new_streak: number;
 }
+
+export interface WeeklyDayData {
+  day: string;
+  date: string;
+  score: number;
+  scans: number;
+}
+
+export interface WeeklyReportResponse {
+  user_id: string;
+  is_demo: boolean;
+  has_data: boolean;
+  weekly_avg: number | null;
+  total_scans: number;
+  days: WeeklyDayData[];
+  message: string;
+}
+
+export interface NutritionInsightsResponse {
+  user_id: string;
+  is_demo: boolean;
+  has_data: boolean;
+  total_scans: number;
+  clean_diet_ratio: number | null;
+  upf_ratio: number | null;
+  avg_purity_score: number | null;
+  hazards_avoided_count: number;
+  sugar_today_g: number;
+  sodium_today_mg: number;
+  protein_today_g: number;
+  clean_brands: Array<{ name: string; score: number; label: string; icon: string }>;
+  watchlist_brands: Array<{ name: string; score: number; label: string; icon: string }>;
+  summary_message: string;
+}
 export const DEFAULT_USER_PROFILE: UserProfile = {
   user_id: "",
   email: "",
@@ -226,10 +260,37 @@ export const setAuthToken = (token: string): void => {
   }
 };
 
+export const isDemoMode = (): boolean => {
+  if (typeof window !== "undefined" && window.localStorage) {
+    return window.localStorage.getItem("nutrilens_auth_mode") === "demo";
+  }
+  return false;
+};
+
+export const setDemoMode = (val: boolean): void => {
+  if (typeof window !== "undefined" && window.localStorage) {
+    if (val) {
+      window.localStorage.setItem("nutrilens_auth_mode", "demo");
+    } else {
+      window.localStorage.setItem("nutrilens_auth_mode", "real");
+    }
+  }
+};
+
 export const clearAuthSession = (): void => {
   if (typeof window !== "undefined" && window.localStorage) {
     window.localStorage.removeItem("nutrilens_auth_token");
     window.localStorage.removeItem("nutrilens_active_user_id");
+    window.localStorage.removeItem("nutrilens_auth_mode");
+    // Clear user cached profiles
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith("nutrilens_profile_")) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => window.localStorage.removeItem(k));
   }
 };
 
@@ -735,14 +796,117 @@ export const analyzeBarcodeImage = async (
   }
 };
 
-export const getUserStats = async (userId: string = "default_user"): Promise<UserStatsResponse> => {
+export const getUserStats = async (userId: string = "default_user", isDemoArg?: boolean): Promise<UserStatsResponse> => {
+  const isDemo = isDemoArg !== undefined ? isDemoArg : (isDemoMode() || userId === "demo_user" || userId === "default_user");
   try {
     const response = await apiFetch(`/user/stats?user_id=${encodeURIComponent(userId)}`, { method: "GET" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
   } catch (error) {
     console.warn("Notice: Using fallback user stats (backend offline/pending):", error);
-    return { ...DEFAULT_USER_STATS, user_id: userId };
+    if (isDemo) {
+      return { ...DEFAULT_USER_STATS, user_id: userId };
+    }
+    return {
+      user_id: userId,
+      current_streak: 0,
+      scans_today: 0,
+      total_scans: 0,
+      xp: 0,
+      level: 1,
+      badges: []
+    };
+  }
+};
+
+export const getWeeklyReport = async (userId: string = "", isDemoArg?: boolean): Promise<WeeklyReportResponse> => {
+  const isDemo = isDemoArg !== undefined ? isDemoArg : (isDemoMode() || userId === "demo_user" || userId === "default_user");
+  try {
+    const response = await apiFetch(`/user/weekly-report?user_id=${encodeURIComponent(userId)}`, { method: "GET" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    if (isDemo) {
+      return {
+        user_id: userId,
+        is_demo: true,
+        has_data: true,
+        weekly_avg: 83,
+        total_scans: 23,
+        days: [
+          { day: "Mon", date: "2026-10-12", score: 82, scans: 3 },
+          { day: "Tue", date: "2026-10-13", score: 74, scans: 2 },
+          { day: "Wed", date: "2026-10-14", score: 91, scans: 4 },
+          { day: "Thu", date: "2026-10-15", score: 68, scans: 3 },
+          { day: "Fri", date: "2026-10-16", score: 85, scans: 5 },
+          { day: "Sat", date: "2026-10-17", score: 94, scans: 2 },
+          { day: "Sun", date: "2026-10-18", score: 88, scans: 3 }
+        ],
+        message: "Demo 7-day nutritional purity trend"
+      };
+    }
+    return {
+      user_id: userId,
+      is_demo: false,
+      has_data: false,
+      weekly_avg: null,
+      total_scans: 0,
+      days: [],
+      message: "Your weekly report will appear after your first scan."
+    };
+  }
+};
+
+export const getNutritionInsights = async (userId: string = "", isDemoArg?: boolean): Promise<NutritionInsightsResponse> => {
+  const isDemo = isDemoArg !== undefined ? isDemoArg : (isDemoMode() || userId === "demo_user" || userId === "default_user");
+  try {
+    const response = await apiFetch(`/user/nutrition-insights?user_id=${encodeURIComponent(userId)}`, { method: "GET" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    if (isDemo) {
+      return {
+        user_id: userId,
+        is_demo: true,
+        has_data: true,
+        total_scans: 28,
+        clean_diet_ratio: 78,
+        upf_ratio: 22,
+        avg_purity_score: 84,
+        hazards_avoided_count: 14,
+        sugar_today_g: 16.0,
+        sodium_today_mg: 980.0,
+        protein_today_g: 52.0,
+        clean_brands: [
+          { name: "Organic Valley", score: 96, label: "Zero Artificial Preservatives", icon: "🌱" },
+          { name: "Simple Mills", score: 93, label: "Almond & Coconut Flour Whole Snacks", icon: "🌾" },
+          { name: "Artisana Organics", score: 91, label: "Raw Single-Ingredient Nut Butters", icon: "🥜" },
+          { name: "Purely Elizabeth", score: 89, label: "Ancient Grain Chia Granola", icon: "🥣" }
+        ],
+        watchlist_brands: [
+          { name: "MegaSnack Chips", score: 24, label: "Contains E621, E102, Refined Palm Oil", icon: "🍟" },
+          { name: "UltraCola Refresh", score: 18, label: "High Fructose Corn Syrup & Phosphoric Acid", icon: "🥤" },
+          { name: "SweetCrave Frosting", score: 22, label: "Hydrogenated Trans-Fats & Titanium Dioxide", icon: "🧁" }
+        ],
+        summary_message: "Demo nutritional insights preview."
+      };
+    }
+    return {
+      user_id: userId,
+      is_demo: false,
+      has_data: false,
+      total_scans: 0,
+      clean_diet_ratio: null,
+      upf_ratio: null,
+      avg_purity_score: null,
+      hazards_avoided_count: 0,
+      sugar_today_g: 0.0,
+      sodium_today_mg: 0.0,
+      protein_today_g: 0.0,
+      clean_brands: [],
+      watchlist_brands: [],
+      summary_message: "Scan a food item to discover personalized nutrition insights."
+    };
   }
 };
 
