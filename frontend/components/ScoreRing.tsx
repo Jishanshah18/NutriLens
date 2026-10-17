@@ -7,6 +7,8 @@ interface ScoreRingProps {
   strokeWidth?: number;
   label?: string;
   showGrade?: boolean;
+  colorOverride?: string;
+  gradeOverride?: string;
 }
 
 export const ScoreRing: React.FC<ScoreRingProps> = ({
@@ -14,7 +16,9 @@ export const ScoreRing: React.FC<ScoreRingProps> = ({
   size = 130,
   strokeWidth = 10,
   label = "HEALTH SCORE",
-  showGrade = true
+  showGrade = true,
+  colorOverride,
+  gradeOverride
 }) => {
   const animatedScore = useRef(new Animated.Value(0)).current;
 
@@ -28,6 +32,7 @@ export const ScoreRing: React.FC<ScoreRingProps> = ({
 
   // Color determination
   const getColor = (val: number) => {
+    if (colorOverride) return colorOverride;
     if (val >= 80) return "#10B981"; // Emerald
     if (val >= 50) return "#F59E0B"; // Amber
     return "#EF4444"; // Crimson
@@ -36,11 +41,13 @@ export const ScoreRing: React.FC<ScoreRingProps> = ({
   const color = getColor(score);
 
   const getGrade = (val: number) => {
+    if (gradeOverride) return { grade: gradeOverride, text: val <= 35 ? "Unsuitable" : "Custom" };
     if (val >= 90) return { grade: "A+", text: "Clean Whole Food" };
     if (val >= 80) return { grade: "A", text: "Healthy Choice" };
     if (val >= 65) return { grade: "B", text: "Moderately Processed" };
     if (val >= 45) return { grade: "C", text: "High In Additives" };
-    return { grade: "D", text: "Ultra-Processed" };
+    if (val >= 35) return { grade: "D", text: "Limit / Caution" };
+    return { grade: "E", text: "Avoid / Unsuitable" };
   };
 
   const { grade, text: gradeText } = getGrade(score);

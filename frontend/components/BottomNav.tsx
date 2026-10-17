@@ -19,10 +19,24 @@ const TABS: TabItem[] = [
   { name: "profile", route: "/profile", icon: "👤", label: "Profile" }
 ];
 
-export const BottomNav: React.FC = () => {
+interface BottomNavProps {
+  onScanPress?: () => void;
+}
+
+export const BottomNav: React.FC<BottomNavProps> = ({ onScanPress }) => {
   const router = useRouter();
   const pathname = usePathname();
   const { colors, isDark } = useTheme();
+
+  const isScannerPage = pathname.startsWith("/scanner");
+
+  const handleMainButtonPress = () => {
+    if (isScannerPage && onScanPress) {
+      onScanPress();
+    } else {
+      router.push("/scanner");
+    }
+  };
 
   return (
     <View style={{
@@ -48,7 +62,7 @@ export const BottomNav: React.FC = () => {
         const isActive = (tab.route === "/" && (pathname === "/" || pathname === "/index")) ||
                          (tab.route !== "/" && pathname.startsWith(tab.route));
 
-        // Center Elevated Prominent Scanner Button
+        // Center Elevated Prominent Scanner / Capture Button
         if (tab.isMain) {
           return (
             <View
@@ -61,7 +75,7 @@ export const BottomNav: React.FC = () => {
               }}
             >
               <TouchableOpacity
-                onPress={() => router.push(tab.route as any)}
+                onPress={handleMainButtonPress}
                 activeOpacity={0.85}
                 style={{
                   top: -20,
@@ -85,15 +99,15 @@ export const BottomNav: React.FC = () => {
                   width: 56,
                   height: 56,
                   borderRadius: 28,
-                  backgroundColor: "rgba(255, 255, 255, 0.22)",
+                  backgroundColor: isScannerPage ? "rgba(255, 255, 255, 0.35)" : "rgba(255, 255, 255, 0.22)",
                   alignItems: "center",
                   justifyContent: "center",
-                  borderWidth: 1,
-                  borderColor: "rgba(255, 255, 255, 0.4)"
+                  borderWidth: 1.5,
+                  borderColor: isScannerPage ? "#FFFFFF" : "rgba(255, 255, 255, 0.4)"
                 }}>
                   <Image
                     source={require("../assets/camera-icon-white.png")}
-                    style={{ width: 26, height: 26 }}
+                    style={{ width: 28, height: 28 }}
                     resizeMode="contain"
                   />
                 </View>
@@ -106,7 +120,7 @@ export const BottomNav: React.FC = () => {
                 top: -14,
                 letterSpacing: 0.2
               }}>
-                Scan
+                {isScannerPage ? "Capture" : "Scan"}
               </Text>
             </View>
           );

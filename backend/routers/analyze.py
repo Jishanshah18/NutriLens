@@ -121,16 +121,16 @@ async def analyze_label_image_file_endpoint(
         from PIL import Image, ImageOps
         import io, gc
 
-        # Memory optimization: resize huge raw packaging photos to 960px before base64 encoding
+        # Keep high resolution (up to 1800px) with high-fidelity LANCZOS resampling so tiny font on packets is preserved
         try:
             with Image.open(io.BytesIO(contents)) as pil_img:
                 pil_img = ImageOps.exif_transpose(pil_img)
                 max_d = max(pil_img.width, pil_img.height)
-                if max_d > 960:
-                    scale = 960.0 / max_d
-                    pil_img = pil_img.resize((int(pil_img.width * scale), int(pil_img.height * scale)), Image.Resampling.BILINEAR)
+                if max_d > 1800:
+                    scale = 1800.0 / max_d
+                    pil_img = pil_img.resize((int(pil_img.width * scale), int(pil_img.height * scale)), Image.Resampling.LANCZOS)
                 buf = io.BytesIO()
-                pil_img.convert("RGB").save(buf, format="JPEG", quality=85, optimize=True)
+                pil_img.convert("RGB").save(buf, format="JPEG", quality=95, optimize=True)
                 image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
                 del buf
         except Exception:

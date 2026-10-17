@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, Text, Animated, StyleSheet, Easing } from "react-native";
+import { View, Text, Animated, StyleSheet, Easing, Platform } from "react-native";
 import { useTheme } from "../lib/ThemeContext";
 
 interface ScanningOverlayProps {
@@ -42,23 +42,23 @@ export const ScanningOverlay: React.FC<ScanningOverlayProps> = ({ onComplete, pr
     // Pulse rings loop
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseRing1, { toValue: 1.2, duration: 1200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulseRing1, { toValue: 0.6, duration: 1000, easing: Easing.in(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulseRing1, { toValue: 1.2, duration: 1200, easing: Easing.out(Easing.ease), useNativeDriver: Platform.OS !== "web" }),
+        Animated.timing(pulseRing1, { toValue: 0.6, duration: 1000, easing: Easing.in(Easing.ease), useNativeDriver: Platform.OS !== "web" }),
       ])
     ).start();
 
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseRing2, { toValue: 1.35, duration: 1400, delay: 200, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulseRing2, { toValue: 0.4, duration: 1100, easing: Easing.in(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulseRing2, { toValue: 1.35, duration: 1400, delay: 200, easing: Easing.out(Easing.ease), useNativeDriver: Platform.OS !== "web" }),
+        Animated.timing(pulseRing2, { toValue: 0.4, duration: 1100, easing: Easing.in(Easing.ease), useNativeDriver: Platform.OS !== "web" }),
       ])
     ).start();
 
     // Scan line vertical loop
     Animated.loop(
       Animated.sequence([
-        Animated.timing(scanLine, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }),
-        Animated.timing(scanLine, { toValue: 0, duration: 900, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(scanLine, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: Platform.OS !== "web" }),
+        Animated.timing(scanLine, { toValue: 0, duration: 900, easing: Easing.linear, useNativeDriver: Platform.OS !== "web" }),
       ])
     ).start();
 

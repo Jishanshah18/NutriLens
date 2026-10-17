@@ -22,13 +22,56 @@ const LANGUAGES = [
   { code: "fr", label: "Français 🇫🇷" }
 ];
 
-const QUICK_SUGGESTIONS = [
-  "Is E621 (MSG) dangerous?",
-  "What are ultra-processed foods?",
-  "Find clean snacks for weight loss",
-  "Is Maltodextrin worse than sugar?",
-  "Healthy swaps for packaged chips"
-];
+const LANGUAGE_CONFIGS: Record<string, {
+  placeholder: string;
+  welcome: (name: string) => string;
+  suggestions: string[];
+}> = {
+  en: {
+    placeholder: "Ask about ingredients, additives, E-codes...",
+    welcome: (name) => `${name ? `Hello ${name}!` : "Hello!"} I am your NutriLens AI Nutritionist. Ask me about any ingredient, preservative E-code, allergen risk, or diet optimization!`,
+    suggestions: [
+      "Is E621 (MSG) dangerous?",
+      "What are ultra-processed foods?",
+      "Find clean snacks for weight loss",
+      "Healthy breakfast ideas",
+      "Is Maltodextrin worse than sugar?"
+    ]
+  },
+  hi: {
+    placeholder: "खाद्य सामग्री, एडिटिव्स, E-कोड के बारे में पूछें...",
+    welcome: (name) => `${name ? `नमस्ते ${name}!` : "नमस्ते!"} मैं आपका NutriLens AI पोषण विशेषज्ञ हूँ। मुझसे किसी भी खाद्य पदार्थ, प्रिजर्वेटिव E-कोड, डायबिटीज/बीपी डाइट या स्वस्थ आहार के बारे में पूछें!`,
+    suggestions: [
+      "क्या E621 (MSG) सुरक्षित है?",
+      "अल्ट्रा-प्रोसेस्ड फूड्स क्या हैं?",
+      "वजन घटाने के लिए स्वस्थ स्नैक्स",
+      "सुबह का सबसे अच्छा नाश्ता",
+      "डायबिटीज में क्या खाएं?"
+    ]
+  },
+  es: {
+    placeholder: "Pregunta sobre ingredientes, aditivos, códigos E...",
+    welcome: (name) => `${name ? `¡Hola ${name}!` : "¡Hola!"} Soy tu Nutricionista IA de NutriLens. ¡Pregúntame sobre cualquier ingrediente, aditivos E, alérgenos o dietas saludables!`,
+    suggestions: [
+      "¿Es peligroso el E621 (GMS)?",
+      "¿Qué son los ultraprocesados?",
+      "Snacks limpios para adelgazar",
+      "Mejores opciones de desayuno",
+      "Alimentos para la diabetes"
+    ]
+  },
+  fr: {
+    placeholder: "Posez une question sur les ingrédients, additifs...",
+    welcome: (name) => `${name ? `Bonjour ${name} !` : "Bonjour !"} Je suis votre Nutritionniste IA NutriLens. Posez-moi vos questions sur les ingrédients, additifs E, allergènes ou régimes sains !`,
+    suggestions: [
+      "Le E621 (MSG) est-il dangereux ?",
+      "Que sont les ultra-transformés ?",
+      "Collations saines pour mincir",
+      "Idées de petit-déjeuner sain",
+      "Alimentation pour diabétique"
+    ]
+  }
+};
 
 export default function ChatScreen() {
   const router = useRouter();
@@ -62,24 +105,43 @@ export default function ChatScreen() {
   const dot2 = useRef(new Animated.Value(0.3)).current;
   const dot3 = useRef(new Animated.Value(0.3)).current;
 
+  const handleSelectLanguage = (langCode: string) => {
+    setSelectedLang(langCode);
+    const rawName = authProfile?.full_name?.trim() || profile?.full_name?.trim() || "";
+    const name = rawName ? rawName.split(" ")[0] : "";
+    const config = LANGUAGE_CONFIGS[langCode] || LANGUAGE_CONFIGS.en;
+
+    setMessages((prev) => {
+      if (prev.length <= 1) {
+        return [{
+          id: "m-welcome",
+          sender: "ai",
+          text: config.welcome(name),
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        }];
+      }
+      return prev;
+    });
+  };
+
   // Dynamically update greeting text whenever user profile name is loaded
   useEffect(() => {
     const rawName = authProfile?.full_name?.trim() || profile?.full_name?.trim() || "";
     const name = rawName ? rawName.split(" ")[0] : "";
-    const greeting = name ? `Hello ${name}!` : "Hello!";
+    const config = LANGUAGE_CONFIGS[selectedLang] || LANGUAGE_CONFIGS.en;
     setMessages((prev) => {
       if (prev.length > 0 && prev[0].id === "m-welcome") {
         return [
           {
             ...prev[0],
-            text: `${greeting} I am your NutriLens AI Nutritionist. Ask me about any ingredient, preservative E-code, allergen risk, or diet optimization!`
+            text: config.welcome(name)
           },
           ...prev.slice(1)
         ];
       }
       return prev;
     });
-  }, [authProfile?.full_name, profile?.full_name]);
+  }, [authProfile?.full_name, profile?.full_name, selectedLang]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -234,7 +296,7 @@ export default function ChatScreen() {
             return (
               <TouchableOpacity
                 key={lang.code}
-                onPress={() => setSelectedLang(lang.code)}
+                onPress={() => handleSelectLanguage(lang.code)}
                 style={{
                   paddingHorizontal: 12,
                   paddingVertical: 5,
@@ -345,7 +407,7 @@ export default function ChatScreen() {
       {/* Quick Suggestion Chips */}
       <View style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.bg }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-          {QUICK_SUGGESTIONS.map((chip, idx) => (
+          {(LANGUAGE_CONFIGS[selectedLang]?.suggestions || LANGUAGE_CONFIGS.en.suggestions).map((chip, idx) => (
             <TouchableOpacity
               key={idx}
               onPress={() => handleSend(chip)}
@@ -381,7 +443,7 @@ export default function ChatScreen() {
         <TextInput
           value={inputText}
           onChangeText={setInputText}
-          placeholder="Ask about ingredients, additives, E-codes..."
+          placeholder={LANGUAGE_CONFIGS[selectedLang]?.placeholder || LANGUAGE_CONFIGS.en.placeholder}
           placeholderTextColor={colors.textDim}
           onSubmitEditing={() => handleSend()}
           style={{

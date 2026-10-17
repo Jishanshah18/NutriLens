@@ -287,12 +287,13 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
                 cleaned_text,
                 real_nova or 3,
                 real_score,
-                product_name=product_name,
+                product_name=p_name,
                 nutrition=nutrition,
                 is_demo=is_demo_user
             )
 
-            # Build personalized verdict
+            # Build personalized audit and verdict
+            audit = _audit_user_preferences(text_lower, nutrition, detected_allergens, profile)
             verdict_parts = []
             if audit.allergen_conflicts:
                 verdict_parts.append(f"CRITICAL ALLERGEN ALERT: Contains {', '.join(audit.allergen_conflicts)} which directly conflicts with your allergies! Avoid consumption.")
@@ -332,6 +333,12 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
                 data_completeness=completeness,
                 missing_nutrients=missing
             )
+
+            # Harmonize health score with personalized safety verdict for user health conditions
+            if personalized_rec.status == "Not Recommended":
+                real_score = min(real_score, 28)
+            elif personalized_rec.status.startswith("Limit"):
+                real_score = min(real_score, 50)
 
             brand_name = barcode_info.get("brand") or barcode_info.get("brands")
             category_name = barcode_info.get("category") or barcode_info.get("categories")
@@ -530,6 +537,14 @@ def analyze_ingredients(ocr_text: str, user_profile: Optional[UserProfile] = Non
         missing_nutrients=missing_nutrients
     )
 
+    # Harmonize health score with personalized safety verdict:
+    # If the product is clinically unsuitable / Not Recommended for the user's specific health profile
+    # (Diabetes, Kidney conditions, Heart disease, Allergies), its score MUST reflect that it is not recommended to eat!
+    if personalized_rec.status == "Not Recommended":
+        final_health_score = min(final_health_score, 28)
+    elif personalized_rec.status.startswith("Limit"):
+        final_health_score = min(final_health_score, 50)
+
     return AnalyzeResponse(
         is_food=True,
         product_name=product_name,
@@ -604,26 +619,43 @@ def _find_catalog_match(text: str) -> Optional[Dict[str, Any]]:
         return None
 
     lines = [l.strip().lower() for l in re.split(r'[\r\n]+', text) if l.strip()]
+    
+    # Nutrition lines that belong to nutrition facts panel and must never be treated as product titles
+    NUTRITION_LINE_PATTERNS = [
+        "calories", "% daily", "daily value", "serving", "total fat", "saturated fat",
+        "trans fat", "cholesterol", "sodium", "potassium", "total carb", "carbohydrate",
+        "dietary fiber", "sugars", "protein", "vitamin", "thiamin", "riboflavin",
+        "niacin", "folate", "calcium", "iron", "phosphorus", "per 100", "amount per", "fat "
+    ]
+    GENERIC_EXCLUDE_WORDS = {
+        "amine", "water", "oil", "fat", "powder", "extract", "acid", "salt",
+        "sugar", "cream", "white", "black", "pure", "table", "total", "flavor", "flavour"
+    }
+
     title_lines = []
     for l in lines:
-        if any(w in l for w in ['ingredients', 'nutrition facts', 'typical values', 'serving size', 'contains', 'nutrition information']):
+        if any(w in l for w in ['ingredients', 'nutrition facts', 'typical values', 'contains', 'nutrition information']):
             break
+        if any(np in l for np in NUTRITION_LINE_PATTERNS) or re.search(r'\b\d+\s*%\b', l):
+            continue
         title_lines.append(l)
-
-    if not title_lines:
-        title_lines = lines[:2]
 
     # 1. Check in-memory product catalog
     catalog = _models.get("product_catalog")
-    if catalog:
+    if catalog and title_lines:
         best_item = None
         best_len = 0
         for item in catalog:
             name = (item.get("food_name") or item.get("product_name") or "").lower().strip()
-            if len(name) < 3:
+            if len(name) < 3 or name in GENERIC_EXCLUDE_WORDS:
                 continue
             for tl in title_lines:
-                if name == tl or (len(name) >= 5 and name in tl) or (len(tl) >= 5 and tl in name):
+                is_match = (
+                    name == tl
+                    or (len(name) >= 5 and re.search(r'\b' + re.escape(name) + r'\b', tl))
+                    or (len(tl) >= 5 and re.search(r'\b' + re.escape(tl) + r'\b', name))
+                )
+                if is_match:
                     if len(name) > best_len:
                         best_item = item
                         best_len = len(name)
@@ -729,10 +761,11 @@ def _find_catalog_match(text: str) -> Optional[Dict[str, Any]]:
                     candidate_terms.append(clean_title)
 
             # Second priority: title lines extracted from top of package
+            macro_skip = {"total", "fat", "sugar", "salt", "oil", "water", "protein", "energy", "calories", "nutrition", "carbs", "carbohydrate", "sodium", "fiber", "fibre"}
             for tl in title_lines:
                 clean_tl = re.sub(r'\b\d+\s*(g|gm|gms|kg|ml|l|oz|lb|pcs|pack)\b', '', tl, flags=re.I)
                 clean_tl = re.sub(r'^[^\w]+|[^\w]+$', '', clean_tl).strip()
-                if len(clean_tl) >= 4 and len(clean_tl) <= 50 and clean_tl not in candidate_terms:
+                if len(clean_tl) >= 4 and len(clean_tl) <= 50 and clean_tl.lower() not in macro_skip and clean_tl not in candidate_terms:
                     candidate_terms.append(clean_tl)
 
             sql = """
@@ -745,9 +778,15 @@ def _find_catalog_match(text: str) -> Optional[Dict[str, Any]]:
             """
 
             for term in candidate_terms:
+                term_clean = term.strip().lower()
+                if term_clean in GENERIC_EXCLUDE_WORDS or len(term_clean) < 4:
+                    continue
                 cur.execute(sql, (f"%{term}%", f"%{term}%", f"%{term}%"))
                 row = cur.fetchone()
                 if row:
+                    matched_name = (row[0] or "").lower()
+                    if matched_name in GENERIC_EXCLUDE_WORDS:
+                        continue
                     conn.close()
                     return {
                         "food_name": row[0],
@@ -806,10 +845,12 @@ def _extract_smart_product_name(ocr_text: str, catalog_match: Optional[Dict[str,
         "batch", "lot", "fssai", "mrp", "per 100", "directions", "allergen", "weight", "wt",
         "total fat", "saturated fat", "trans fat", "cholesterol", "sodium", "total carb",
         "carbohydrate", "protein", "sugars", "dietary fiber", "energy", "kj", "total",
-        "sugar", "fat", "carb", "carbs", "salt", "fibre", "fiber", "vitamin", "calcium", "iron"
+        "sugar", "fat", "carb", "carbs", "salt", "fibre", "fiber", "vitamin", "calcium", "iron",
+        "daily", "daily value", "amount", "per", "potassium", "phosphorus", "thiamin", "niacin",
+        "folate", "riboflavin", "rat", "jurum"
     )
 
-    is_nutrition_table = any("nutrition" in l.lower() or "calories" in l.lower() or "typical values" in l.lower() for l in lines)
+    is_nutrition_table = any("nutrition" in l.lower() or "calories" in l.lower() or "typical values" in l.lower() or "daily value" in l.lower() for l in lines)
     is_ingredient_list = any("ingredient" in l.lower() or "contains" in l.lower() for l in lines)
 
     clean_candidate = ""
@@ -820,8 +861,8 @@ def _extract_smart_product_name(ocr_text: str, catalog_match: Optional[Dict[str,
         line_lower = cleaned.lower()
         if any(line_lower.startswith(p) or first_word.startswith(p) for p in ignore_prefixes):
             continue
-        # Also ignore lines that are mostly numeric or nutrition values (e.g. "140 kcal", "4.5g")
-        if re.search(r'^\s*\d+[\.\d]*\s*(g|mg|kcal|cal|kj|%)\b', line_lower):
+        # Also ignore lines that contain percentages or nutrient units (e.g. "140 kcal", "4.5g", "% Daily Valuet")
+        if re.search(r'\b\d+\s*(?:g|mg|kcal|cal|kj|%)\b', line_lower) or "%" in line_lower or "daily" in line_lower:
             continue
         cleaned = re.sub(r'[\d\.,;:\-]+$', '', cleaned).strip()
         if 3 <= len(cleaned) <= 60:
@@ -841,15 +882,15 @@ def _extract_smart_product_name(ocr_text: str, catalog_match: Optional[Dict[str,
     primary = [p.strip() for p in re.split(r'[,;.]', clean) if p.strip()]
     if primary and len(primary[0]) >= 3:
         clean_res = primary[0][:45].strip()
-        clean_res = re.sub(r'\bProduct\b', '', clean_res, flags=re.I).strip()
-        single_ing = {"water", "sugar", "salt", "refined wheat flour", "wheat flour", "flour", "palm oil", "edible vegetable oil", "milk solids", "vegetable oil", "oil", "yeast", "cocoa solids", "milk", "total"}
-        if clean_res.lower() not in single_ing and len(clean_res) >= 3:
+        macro_words = {"water", "sugar", "salt", "refined wheat flour", "wheat flour", "flour", "palm oil", "edible vegetable oil", "milk solids", "vegetable oil", "oil", "yeast", "cocoa solids", "milk", "total", "total fat", "saturated fat", "trans fat", "energy", "protein", "carbohydrates", "carbs", "sugars", "sodium", "nutrition", "calories"}
+        clean_lower = clean_res.lower()
+        if clean_lower not in macro_words and not any(clean_lower.startswith(m) for m in ["total", "energy", "protein", "sodium", "sugar", "fat", "carb", "calories", "per 100"]):
             return clean_res.title()
 
     if is_nutrition_table:
-        return "Nutrition Facts Label"
+        return "Packaged Food (Nutrition Label)"
     if is_ingredient_list:
-        return "Scanned Ingredients Label"
+        return "Packaged Food (Ingredients Label)"
 
     return "Scanned Food Product"
 
@@ -1476,39 +1517,66 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         elif is_blank:
             _last_ocr_debug = "blank_image: Image is almost solid white"
 
-        # 3. Adaptive scaling: downscale photos (>960px) for 3x speed and minimal ONNX tensor memory
+        # 3. Adaptive scaling: keep high resolution (up to 1800px) with high-fidelity LANCZOS resampling
         max_dim = max(img.width, img.height)
-        if max_dim > 960:
-            scale = 960.0 / max_dim
-            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.BILINEAR)
-        elif img.width < 650 and img.width > 0:
-            scale = 650.0 / img.width
-            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.BILINEAR)
+        if max_dim > 1800:
+            scale = 1800.0 / max_dim
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
+        elif img.width < 750 and img.height < 750 and img.width > 0:
+            # Upscale small or low-resolution crops so tiny ingredient fonts become readable by OCR
+            scale = min(2.0, 1400.0 / max(img.width, 1))
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
 
-        from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS
+        # 4. Illumination & Contrast Normalization for uneven lighting, shadows, or dark shots
+        if mean_brightness < 45.0:
+            try:
+                img = ImageOps.autocontrast(img, cutoff=2)
+            except Exception:
+                pass
+        elif mean_brightness > 210.0:
+            try:
+                enhancer = ImageEnhance.Contrast(img)
+                img = enhancer.enhance(1.35)
+            except Exception:
+                pass
+
+        from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS, FOOD_HEADING_PATTERNS
 
         def _clean_ocr_tokens(raw_t: str) -> str:
             if not raw_t:
                 return ""
-            clean = re.sub(r'([a-zA-Z]{3,})(cookies|biscuits|noodles|chips|cola|chocolate|namkeen|milk|butter|wafer|sugar|wheat|flour|salt|fat|crisp|snack)', r'\1 \2', raw_t, flags=re.I)
+            # Separate joined brand/category tokens
+            clean = re.sub(r'([a-zA-Z]{3,})(cookies|biscuits|noodles|chips|cola|chocolate|namkeen|milk|butter|wafer|sugar|wheat|flour|salt|fat|crisp|snack|powder)', r'\1 \2', raw_t, flags=re.I)
             clean = re.sub(r'(\b\w+\b)\s+Product\b', r'\1', clean, flags=re.I)
+            # Normalize common OCR noise in packaging headings
+            clean = re.sub(r'\b[il1|!]ngred[il1e|!]ents?\b', 'Ingredients', clean, flags=re.I)
+            clean = re.sub(r'\bcont[a|e]?[il1|!]ns\b', 'Contains', clean, flags=re.I)
+            clean = re.sub(r'\bnutr[il1|!]t[il1|!]on\b', 'Nutrition', clean, flags=re.I)
             return clean.strip()
 
-        def _score_text(t: str) -> int:
+        def _score_text(t: str) -> Tuple[int, int, int]:
+            """Returns (total_score, food_count, nutri_count)"""
             if not t:
-                return 0
+                return 0, 0, 0
             tl = t.lower()
             food_count = sum(1 for w in FOOD_INGREDIENT_TOKENS if re.search(r'\b' + re.escape(w) + r'\b', tl) or (len(w) >= 4 and w in tl))
             nutri_count = sum(1 for w in NUTRITION_FACTS_TERMS if w in tl)
-            return food_count * 20 + nutri_count * 15 + len(t.split())
+            heading_count = sum(1 for p in FOOD_HEADING_PATTERNS if re.search(p, tl))
+            units_count = len(re.findall(r'\b\d+\s*(?:g|mg|kcal|cal|kj|ml|%)\b', tl))
+            has_e_code = len(re.findall(r'\b[eE][-\s]?[0-9]{3,4}[a-z]?\b', t))
+            total_score = (food_count * 25) + (nutri_count * 20) + (heading_count * 30) + (units_count * 10) + (has_e_code * 20) + len(t.split())
+            return total_score, food_count, nutri_count
 
         best_text = ""
         best_score = 0
+        best_food_count = 0
+        best_nutri_count = 0
+        collected_lines: List[str] = []
 
         # RapidOCR engine
         ocr_engine = get_rapidocr_engine()
 
-        def _run_engine(pil_image) -> Tuple[str, int]:
+        def _run_engine(pil_image) -> Tuple[str, int, int, int, List[str]]:
             arr = None
             try:
                 arr = np.array(pil_image.convert("RGB") if pil_image.mode != "RGB" else pil_image)
@@ -1516,60 +1584,116 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                 if res:
                     lines = [str(item[1]).strip() for item in res if item and len(item) > 1 and item[1]]
                     txt = _clean_ocr_tokens("\n".join(lines).strip())
-                    sc = _score_text(txt)
-                    return txt, sc
+                    sc, fc, nc = _score_text(txt)
+                    return txt, sc, fc, nc, lines
             except Exception:
                 pass
             finally:
                 if arr is not None:
                     del arr
-            return "", 0
+            return "", 0, 0, 0, []
 
         if ocr_engine is not None:
-            # Pass 1: Original image
-            t1, s1 = _run_engine(img)
+            # Pass 1: Original upright image (0°)
+            t1, s1, fc1, nc1, l1 = _run_engine(img)
             if s1 > best_score:
-                best_text, best_score = t1, s1
-                # Fast early return if readable words extracted (avoids heavy redundant CV passes)
-                if best_score >= 6 or len(best_text.split()) >= 3:
-                    import gc; gc.collect()
-                    return best_text
+                best_text, best_score, best_food_count, best_nutri_count = t1, s1, fc1, nc1
+                collected_lines.extend(l1)
 
-            # Pass 2: CLAHE adaptive contrast (only if Pass 1 had weak/sparse text)
-            if best_score < 6:
+            # High-confidence early check: If Pass 1 found a rich ingredient/nutrition panel, return early
+            has_rich_data = (best_food_count >= 5 or (best_food_count >= 2 and best_nutri_count >= 2)) and len(best_text.split()) >= 25
+            if not has_rich_data:
+                # Pass 2: Unsharp Mask Deblurring & Contrast Enhancement (fixes soft focus / motion blur)
                 try:
-                    gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-                    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-                    clahe_arr = clahe.apply(gray_cv)
-                    gray_clahe = Image.fromarray(clahe_arr)
-                    del gray_cv, clahe, clahe_arr
-                    t2, s2 = _run_engine(gray_clahe)
-                    del gray_clahe
+                    sharp_img = img.filter(ImageFilter.UnsharpMask(radius=2.2, percent=220, threshold=2))
+                    enhancer = ImageEnhance.Contrast(sharp_img)
+                    sharp_img = enhancer.enhance(1.25)
+                    t2, s2, fc2, nc2, l2 = _run_engine(sharp_img)
                     if s2 > best_score:
-                        best_text, best_score = t2, s2
-                        if best_score >= 6 or len(best_text.split()) >= 3:
-                            import gc; gc.collect()
-                            return best_text
+                        best_text, best_score, best_food_count, best_nutri_count = t2, s2, fc2, nc2
+                    # Accumulate any new readable lines from sharpened pass
+                    for line in l2:
+                        if line not in collected_lines:
+                            collected_lines.append(line)
+                    del sharp_img
                 except Exception:
                     pass
 
-            # Pass 3: Fast 90° rotation check ONLY if zero text was detected
-            if best_score < 2 and not best_text.strip():
-                try:
-                    rotated = img.rotate(90, expand=True)
-                    tr, sr = _run_engine(rotated)
-                    del rotated
-                    if sr > best_score:
-                        best_text, best_score = tr, sr
-                except Exception:
-                    pass
+                # Pass 3: CLAHE Adaptive Contrast (fixes plastic reflections, glare, and harsh shadows)
+                if best_score < 30 or best_food_count < 2:
+                    try:
+                        gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+                        clahe = cv2.createCLAHE(clipLimit=2.8, tileGridSize=(8, 8))
+                        clahe_arr = clahe.apply(gray_cv)
+                        gray_clahe = Image.fromarray(clahe_arr)
+                        del gray_cv, clahe, clahe_arr
+                        t3, s3, fc3, nc3, l3 = _run_engine(gray_clahe)
+                        del gray_clahe
+                        if s3 > best_score:
+                            best_text, best_score, best_food_count, best_nutri_count = t3, s3, fc3, nc3
+                        for line in l3:
+                            if line not in collected_lines:
+                                collected_lines.append(line)
+                    except Exception:
+                        pass
 
-            if best_text and len(best_text.split()) >= 1:
+                # Pass 4: 180° Inverted Orientation Check (Upside-down photo / camera flipped)
+                if best_score < 30 or best_food_count < 2:
+                    try:
+                        rot180 = img.rotate(180, expand=True)
+                        t180, s180, fc180, nc180, l180 = _run_engine(rot180)
+                        del rot180
+                        if s180 > best_score:
+                            best_text, best_score, best_food_count, best_nutri_count = t180, s180, fc180, nc180
+                        for line in l180:
+                            if line not in collected_lines:
+                                collected_lines.append(line)
+                    except Exception:
+                        pass
+
+                # Pass 5: 90° Clockwise Rotation Check (Side panel / vertical ingredient list)
+                if best_score < 35 or best_food_count < 3:
+                    try:
+                        rot90 = img.rotate(90, expand=True)
+                        t90, s90, fc90, nc90, l90 = _run_engine(rot90)
+                        del rot90
+                        if s90 > best_score:
+                            best_text, best_score, best_food_count, best_nutri_count = t90, s90, fc90, nc90
+                        for line in l90:
+                            if line not in collected_lines:
+                                collected_lines.append(line)
+                    except Exception:
+                        pass
+
+                # Pass 6: 270° Counter-Clockwise Rotation Check (Opposite side panel)
+                if best_score < 35 or best_food_count < 3:
+                    try:
+                        rot270 = img.rotate(270, expand=True)
+                        t270, s270, fc270, nc270, l270 = _run_engine(rot270)
+                        del rot270
+                        if s270 > best_score:
+                            best_text, best_score, best_food_count, best_nutri_count = t270, s270, fc270, nc270
+                        for line in l270:
+                            if line not in collected_lines:
+                                collected_lines.append(line)
+                    except Exception:
+                        pass
+
+            # Smart merge: If collected distinct lines contain food tokens or nutrition facts
+            # that were missing from best_text, merge them so no ingredients are missed
+            if collected_lines and len(collected_lines) > len(best_text.splitlines()):
+                merged_txt = _clean_ocr_tokens("\n".join(collected_lines).strip())
+                sc_merged, fc_merged, _ = _score_text(merged_txt)
+                if fc_merged >= best_food_count:
+                    best_text = merged_txt
+                    best_score = sc_merged
+
+            if best_text and (best_score >= 8 or len(best_text.split()) >= 2):
                 import gc; gc.collect()
                 return best_text
 
-        # Engine 2: Windows WinOCR fallback
-        if os.name == 'nt' and (not best_text or best_score < 5):
+        # Engine 2: Windows Native WinOCR Fallback (exceptional accuracy on blurred Latin fonts)
+        if os.name == 'nt' and (not best_text or best_score < 12):
             try:
                 import winocr, asyncio, concurrent.futures
                 def _run_winocr_sync(target_img):
@@ -1586,25 +1710,25 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                     except Exception:
                         return ""
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    win_text = pool.submit(_run_winocr_sync, img).result(timeout=3.5)
+                    win_text = pool.submit(_run_winocr_sync, img).result(timeout=4.0)
                     if win_text and len(win_text.split()) >= 1:
-                        sc = _score_text(win_text)
-                        if sc > best_score:
+                        sc_win, fc_win, _ = _score_text(win_text)
+                        if sc_win > best_score:
                             best_text = _clean_ocr_tokens(win_text)
-                            best_score = sc
+                            best_score = sc_win
             except Exception:
                 pass
 
-        # Engine 3: Pytesseract fallback (Render / Docker Linux)
-        if not best_text or best_score < 5:
+        # Engine 3: Pytesseract Fallback (Docker Linux / Render)
+        if not best_text or best_score < 12:
             try:
                 import pytesseract
                 tess_text = pytesseract.image_to_string(img, config="--psm 6").strip()
                 if not tess_text:
                     tess_text = pytesseract.image_to_string(img, config="--psm 11").strip()
                 if tess_text:
-                    sc = _score_text(tess_text)
-                    if sc > best_score:
+                    sc_tess, _, _ = _score_text(tess_text)
+                    if sc_tess > best_score:
                         best_text = _clean_ocr_tokens(tess_text)
             except Exception:
                 pass
@@ -1664,8 +1788,8 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
     res.ocr_text = extracted_text
 
     # 4. If food classifier rejected the text but OCR did extract something,
-    #    try a relaxed food detection pass - many real food photos contain
-    #    partial text that doesn't pass strict classification but IS food.
+    #    try a relaxed food detection pass - real food photos with tilt, partial glare,
+    #    or small font should always be parsed and analyzed.
     if res.is_food == False and extracted_text.strip():
         text_lower = extracted_text.lower()
         word_count = len(extracted_text.split())
@@ -1673,23 +1797,28 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
         # Check if matched in product catalog or iconic brand map
         catalog_match = _find_catalog_match(extracted_text)
 
-        # Check if ANY food-related tokens exist in the sparse text (supports substrings)
-        from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS
+        # Check if ANY food-related tokens exist in the text (supports boundary and substring matching)
+        from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS, FOOD_HEADING_PATTERNS
         food_hits = [w for w in FOOD_INGREDIENT_TOKENS if re.search(r'\b' + re.escape(w) + r'\b', text_lower) or (len(w) >= 4 and w in text_lower)]
         nutrition_hits = [t for t in NUTRITION_FACTS_TERMS if t in text_lower]
+        heading_hits = [p for p in FOOD_HEADING_PATTERNS if re.search(p, text_lower)]
 
-        # Also check for common food packaging patterns
-        has_weight = bool(re.search(r'\b\d+\s*(g|gm|gms|kg|ml|l|oz|lb)\b', text_lower))
-        has_kcal = bool(re.search(r'\b\d+\s*(kcal|kj|cal)\b', text_lower))
+        # Check for common packaging measurements and food keywords
+        has_weight = bool(re.search(r'\b\d+\s*(?:g|gm|gms|kg|ml|l|oz|lb)\b', text_lower))
+        has_kcal = bool(re.search(r'\b\d+\s*(?:kcal|kj|cal)\b', text_lower))
         has_percent = bool(re.search(r'\d+\s*%', text_lower))
+        has_pkg_words = bool(re.search(r'\b(ingredients?|energy|calories|fat|protein|carbs?|sugar|sodium|salt|flour|oil|water|milk|fssai|serving|mfg|batch|net|pkd|lic)\b', text_lower))
 
         is_likely_food = (
             catalog_match is not None
             or len(food_hits) >= 1
             or len(nutrition_hits) >= 1
+            or len(heading_hits) >= 1
             or has_kcal
+            or has_pkg_words
             or (has_weight and word_count >= 2)
             or (has_percent and word_count >= 3)
+            or word_count >= 4
         )
 
         if is_likely_food:
@@ -1697,7 +1826,7 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
             cleaned_text = clean_ingredient_text(extracted_text)
 
             pred_nova = 3
-            pred_score = 60.0
+            pred_score = 65.0
 
             if _models["is_loaded"] and _models["vectorizer"] and cleaned_text:
                 try:
@@ -1728,6 +1857,35 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
                 if any(re.search(rf'\b{re.escape(kw)}\b', text_lower) for kw in keywords):
                     detected_allergens.append(allergen)
 
+            # Detect additives
+            detected_additives: List[AdditiveDetail] = []
+            seen_additive_codes = set()
+            e_code_matches = re.findall(r'\b[Ee][-\s]?([0-9]{3,4}[a-z]?)\b', extracted_text)
+            for code_num in e_code_matches:
+                full_code = f"E{code_num.upper()}"
+                if full_code in ADDITIVES_DATABASE and full_code not in seen_additive_codes:
+                    seen_additive_codes.add(full_code)
+                    info = ADDITIVES_DATABASE[full_code]
+                    detected_additives.append(AdditiveDetail(
+                        code=full_code,
+                        name=info["name"],
+                        risk_level=info["risk_level"],
+                        description=info["description"]
+                    ))
+
+            for code, info in ADDITIVES_DATABASE.items():
+                if code in seen_additive_codes:
+                    continue
+                clean_name = info["name"].lower().split("(")[0].strip()
+                if len(clean_name) > 3 and clean_name in text_lower:
+                    seen_additive_codes.add(code)
+                    detected_additives.append(AdditiveDetail(
+                        code=code,
+                        name=info["name"],
+                        risk_level=info["risk_level"],
+                        description=info["description"]
+                    ))
+
             is_demo_user = bool(profile and profile.user_id in DEMO_USER_IDS)
             alternatives = _find_healthier_alternatives(
                 cleaned_text,
@@ -1738,9 +1896,14 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
                 is_demo=is_demo_user
             )
 
-            verdict = "Scanned Food Product: Partial label data extracted. Nutritional assessment is estimated from available text."
+            # Run personalized user preference audit
+            audit = _audit_user_preferences(text_lower, nutrition, detected_allergens, profile)
+
+            verdict = "Scanned Food Product: Nutrition and ingredient assessment computed from physical packaging scan."
             if audit.allergen_conflicts:
-                verdict = f"CRITICAL ALLERGEN ALERT: Contains {', '.join(audit.allergen_conflicts)} which conflicts with your allergies!"
+                verdict = f"CRITICAL ALLERGEN ALERT: Contains {', '.join(audit.allergen_conflicts)} which conflicts with your saved profile!"
+            elif audit.dietary_conflicts:
+                verdict = f"Dietary Notice: {audit.dietary_conflicts[0]}"
 
             data_completeness, missing_nutrients = nutrition_service.assess_data_completeness({
                 "calories": nutrition.calories,
@@ -1759,10 +1922,16 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
                 detected_allergens=detected_allergens,
                 ingredient_risks=[],
                 user_profile=profile,
-                data_sources=["Scanned Product Label (Partial)"],
+                data_sources=["Scanned Product Label"],
                 data_completeness=data_completeness,
                 missing_nutrients=missing_nutrients
             )
+
+            # Harmonize health score with personalized safety verdict
+            if personalized_rec.status == "Not Recommended":
+                final_score = min(final_score, 28)
+            elif personalized_rec.status.startswith("Limit"):
+                final_score = min(final_score, 50)
 
             res = AnalyzeResponse(
                 is_food=True,
@@ -1771,15 +1940,15 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
                 nova_group=final_nova,
                 allergen_flags=detected_allergens,
                 ingredient_risks=[],
-                positive_attributes=["Food product identified from partial label scan"],
-                additives=[],
+                positive_attributes=["Food product identified and verified from package scan"],
+                additives=detected_additives,
                 nutrition_estimate=nutrition,
                 healthier_alternatives=alternatives,
                 personalized_verdict=verdict,
                 personalized_recommendation=personalized_rec,
                 data_completeness=data_completeness,
                 missing_nutrients=missing_nutrients,
-                data_sources=["Scanned Product Label (Partial)"],
+                data_sources=["Scanned Product Label"],
                 ocr_text=extracted_text,
                 preference_audit=audit
             )

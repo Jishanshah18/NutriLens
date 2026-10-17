@@ -44,7 +44,45 @@ FOOD_INGREDIENT_TOKENS = {
     "oil", "butter", "margarine", "fat", "lard", "shortening", "ghee", "milk", "cream",
     "cheese", "cheddar", "mozzarella", "parmesan", "ricotta", "yogurt", "curd", "whey",
     "casein", "buttermilk", "palm", "canola", "sunflower", "soybean", "olive", "coconut",
-    "paneer", "dahi", "lassi", "chaas", "khoya", "mawa",
+    "paneer", "dahi", "lassi", "chaas", "khoya", "mawa", "palmolein", "edible vegetable oil",
+    "vegetable fat", "refined oil", "hydrogenated vegetable oil", "interesterified vegetable fat",
+    "vanaspati", "cocoa butter", "butter oil", "anhydrous milk fat", "milk solids", "condensed milk",
+    "dairy solids", "skimmed milk", "whole milk powder", "whey powder", "whey protein", "cheese powder",
+
+    # Flours, Grains, Seeds & Starches
+    "flour", "wheat", "grain", "oats", "oatmeal", "rice", "corn", "barley", "rye", "millet",
+    "quinoa", "buckwheat", "semolina", "tapioca", "starch", "cornstarch", "potato", "chia",
+    "flaxseed", "sesame", "sunflower", "pumpkin", "hemp", "gluten", "bran", "cereal",
+    "maida", "atta", "wheat flour", "refined wheat flour", "suji", "sooji", "rava", "besan",
+    "gram flour", "corn flour", "malt", "malt extract", "barley malt", "oat flakes", "rolled oats",
+    "dextrin", "liquid glucose",
+
+    # Sugars, Sweeteners & Syrups
+    "sugar", "sucrose", "glucose", "fructose", "dextrose", "maltose", "lactose", "maltodextrin",
+    "syrup", "honey", "molasses", "cane", "stevia", "aspartame", "sucralose", "acesulfame",
+    "erythritol", "xylitol", "sorbitol", "caramel", "treacle", "agave", "invert sugar",
+    "invert syrup", "corn syrup", "cane sugar", "raw sugar", "brown sugar", "icing sugar",
+    "dextrose monohydrate", "high fructose corn syrup", "steviol glycosides", "maltitol", "isomalt",
+
+    # Flavorings, Spices, Extracts & Additives
+    "salt", "sea salt", "sodium", "pepper", "cinnamon", "vanilla", "yeast", "vinegar",
+    "citric acid", "malic acid", "ascorbic acid", "lecithin", "pectin", "gelatin",
+    "xanthan", "guar gum", "flavor", "flavour", "flavoring", "seasoning", "spice",
+    "spices", "herb", "herbs", "curry", "paprika", "turmeric", "oregano", "basil",
+    "parsley", "preservative", "preservatives", "antioxidant", "antioxidants",
+    "emulsifier", "emulsifiers", "color", "colour", "extract", "puree", "concentrate",
+    "water", "masala", "sauce", "ketchup", "mayo", "mayonnaise", "jam", "jelly",
+    "pickle", "chutney", "leavening agent", "raising agent", "acidity regulator",
+    "anticaking agent", "humectant", "stabilizer", "stabilizers", "thickener",
+    "thickeners", "glazing agent", "flavor enhancer", "flavour enhancer",
+    "flavoring substance", "flavouring substance", "permitted synthetic food colour",
+    "nature identical flavouring", "artificial flavouring", "dough conditioner",
+    "iodised salt", "iodized salt", "rock salt", "black salt", "sendha namak",
+    "kala namak", "coriander", "cumin", "jeera", "cardamom", "elaichi", "clove",
+    "laung", "dalchini", "fenugreek", "methi", "asafoetida", "hing", "black pepper",
+    "kali mirch", "red chilli", "mirchi", "amchur", "garam masala", "tamarind", "imli",
+    "curry leaves", "kasuri methi", "ajwain", "saunf", "fennel", "nutmeg", "jaiphal",
+    "mustard seeds", "rai",
 
     # Proteins, Meats & Plant Proteins
     "chicken", "beef", "pork", "turkey", "fish", "salmon", "tuna", "shrimp", "egg", "eggs",
@@ -59,15 +97,6 @@ FOOD_INGREDIENT_TOKENS = {
     # Nuts & Legumes
     "almond", "almonds", "peanut", "peanuts", "cashew", "walnut", "walnuts", "pistachio",
     "pecan", "hazelnut", "macadamia",
-
-    # Flavorings, Spices, Extracts & Additives
-    "salt", "sea salt", "sodium", "pepper", "cinnamon", "vanilla", "yeast", "vinegar",
-    "citric acid", "malic acid", "ascorbic acid", "lecithin", "pectin", "gelatin",
-    "xanthan", "guar gum", "flavor", "flavour", "flavoring", "seasoning", "spice",
-    "spices", "herb", "herbs", "curry", "paprika", "turmeric", "oregano", "basil",
-    "parsley", "preservative", "antioxidant", "emulsifier", "color", "colour",
-    "extract", "puree", "concentrate", "water", "masala", "sauce", "ketchup",
-    "mayo", "mayonnaise", "jam", "jelly", "pickle", "chutney",
 
     # Iconic Packaged Food Brands & Products
     "parle", "parle-g", "parleg", "britannia", "amul", "nestle", "cadbury", "lays", "lay's", "haldiram",
@@ -97,28 +126,35 @@ NUTRITION_FACTS_TERMS = {
     "calories", "calorie", "kcal", "energy", "kj", "total fat", "saturated fat", "trans fat",
     "cholesterol", "sodium", "total carbohydrate", "carbohydrate", "carbohydrates",
     "carbs", "dietary fiber", "dietary fibre", "fiber", "fibre", "sugars", "added sugars",
-    "protein", "vitamin", "vitamins", "calcium", "iron", "potassium", "daily value", "% dv",
-    "per 100g", "per 100ml", "per serving", "net weight", "net wt", "net quantity", "fssai"
+    "total sugars", "protein", "vitamin", "vitamins", "calcium", "iron", "potassium", "daily value", "% dv",
+    "per 100g", "per 100ml", "per serving", "per serve", "net weight", "net wt", "net quantity", "fssai",
+    "lic no", "lic. no", "batch no", "mfg date", "expiry date", "best before"
 }
 
-# Ingredient list headings & packaging indicators
+# Ingredient list headings & packaging indicators (noise and OCR error tolerant)
 FOOD_HEADING_PATTERNS = [
-    r'\bingredients?\s*[:\-]',
+    r'\b[il1|!]?ngred[il1e|!]ents?\s*[:\-]?',
     r'\bcontents?\s*[:\-]',
-    r'\bcontains?\s*[:\-]',
+    r'\bcont[a|e]?[il1|!]ns?\s*[:\-]',
     r'\bingrédients?\s*[:\-]',
     r'\bingredientes?\s*[:\-]',
     r'\ballergen (advice|information)\b',
-    r'\bnutritional (information|facts|values)\b',
-    r'\bper 100\s*(g|ml)\b',
+    r'\bnutr[il1|!]t[il1|!]on(al)?\s*(information|facts|values|info)?\b',
+    r'\bper\s*100\s*(g|ml)\b',
     r'\benergy\s*[:\-]?\s*\d+\s*(kcal|kj)\b',
     r'\bfssai\b',
-    r'\bnet (quantity|content|weight|wt)\b',
+    r'\blic\.?\s*(no|number|#)?\s*[:\.]?\s*\d+',
+    r'\bnet\s*(quantity|content|weight|wt)\b',
     r'\bbest before\b',
-    r'\bmfg (date|dt)\b',
-    r'\bbatch (no|number)\b',
+    r'\bmfg (date|dt)?\b',
+    r'\bbatch (no|number)?\b',
     r'\bmanufactured (by|in|for)\b',
-    r'\bstore in a (cool|dry)\b'
+    r'\bstore in a (cool|dry)\b',
+    r'\bserve?\s*size\b',
+    r'\bprotein\b',
+    r'\bcarbohydrate\b',
+    r'\bsugars?\b',
+    r'\btotal fat\b'
 ]
 
 # Non-Food & Foreign Object Keywords

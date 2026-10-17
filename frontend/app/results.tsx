@@ -359,13 +359,23 @@ export default function ResultsScreen() {
           }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted, textTransform: "uppercase" }}>
-                Nutritional Integrity
+                {rec.health_conditions_considered && rec.health_conditions_considered.length > 0 && !rec.health_conditions_considered[0].includes("No Specific Conditions")
+                  ? "Personalized Health Rating"
+                  : "Nutritional Integrity"}
               </Text>
-              <Text style={{ fontSize: 15, fontWeight: "800", color: statusConfig.badgeColor, marginTop: 2 }}>
-                Score: {data.health_score}/100
+              <Text style={{ fontSize: 16, fontWeight: "900", color: statusConfig.badgeColor, marginTop: 2 }}>
+                {rec.status === "Not Recommended"
+                  ? "Unsuitable / Low Rating"
+                  : rec.status.includes("Limit")
+                  ? "Moderate Safety Rating"
+                  : "Optimal Safety Rating"}: {data.health_score}/100
               </Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                {data.nova_group === 4
+              <Text style={{ fontSize: 11, color: statusConfig.badgeColor, fontWeight: "700", marginTop: 2 }}>
+                {rec.status === "Not Recommended"
+                  ? "❌ Conflicts with your health profile (Unsafe to consume)"
+                  : rec.status.includes("Limit")
+                  ? "⚠️ Limit consumption based on your profile"
+                  : data.nova_group === 4
                   ? "Ultra-Processed Formulation (NOVA 4)"
                   : data.nova_group === 3
                   ? "Moderately Processed (NOVA 3)"
@@ -373,7 +383,15 @@ export default function ResultsScreen() {
               </Text>
             </View>
 
-            <ScoreRing score={data.health_score} size={88} strokeWidth={8} label="SCORE" showGrade={true} />
+            <ScoreRing
+              score={data.health_score}
+              size={88}
+              strokeWidth={8}
+              label="SCORE"
+              showGrade={true}
+              colorOverride={statusConfig.badgeColor}
+              gradeOverride={rec.status === "Not Recommended" ? "E" : undefined}
+            />
           </View>
         </View>
 

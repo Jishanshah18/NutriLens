@@ -84,6 +84,10 @@ export default function ScannerScreen() {
   const [autoDetectProgress, setAutoDetectProgress] = useState(0);
   const liveScanCooldownRef = useRef(false);
 
+  // Dynamic frame dimensions for full-sweep radar lines
+  const [barcodeFrameHeight, setBarcodeFrameHeight] = useState(117);
+  const [nutritionFrameHeight, setNutritionFrameHeight] = useState(380);
+
   // Selected Image
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
@@ -111,25 +115,34 @@ export default function ScannerScreen() {
   const laserAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.loop(
+    let animLoop: Animated.CompositeAnimation | null = null;
+    laserAnim.setValue(0);
+    animLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(laserAnim, {
           toValue: 1,
           duration: 1800,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true
+          useNativeDriver: Platform.OS !== "web"
         }),
         Animated.timing(laserAnim, {
           toValue: 0,
           duration: 1800,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true
+          useNativeDriver: Platform.OS !== "web"
         })
       ])
-    ).start();
+    );
+    animLoop.start();
 
     // Load active user profile
     loadActiveProfile();
+
+    return () => {
+      if (animLoop) {
+        animLoop.stop();
+      }
+    };
   }, []);
 
   // 1. Live Barcode Continuous Detection Loop (Web & Native)
@@ -279,12 +292,12 @@ export default function ScannerScreen() {
 
   const nutritionLaserY = laserAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 240]
+    outputRange: [6, Math.max(50, nutritionFrameHeight - 14)]
   });
 
   const barcodeLaserY = laserAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 65]
+    outputRange: [6, Math.max(20, barcodeFrameHeight - 10)]
   });
 
   // Convert image URI to Base64
@@ -433,7 +446,7 @@ export default function ScannerScreen() {
         const ctx = canvas.getContext("2d");
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
           capturedBase64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
           setSelectedImageUri(dataUrl);
           stopCamera();
@@ -447,7 +460,7 @@ export default function ScannerScreen() {
       try {
         if (cameraRef.current) {
           const photo = await cameraRef.current.takePictureAsync({
-            quality: 0.85,
+            quality: 0.95,
             base64: true
           });
           if (photo && photo.uri) {
@@ -565,6 +578,19 @@ export default function ScannerScreen() {
     setSelectedImageUri(null);
     setScanStage("IDLE");
     startCamera();
+  };
+
+  const handleBottomNavScanPress = () => {
+    if (scanStage !== "IDLE" || isBarcodeLoading) return;
+    if (selectedImageUri) {
+      handleTryAgain();
+      return;
+    }
+    if (!isCameraActive) {
+      startCamera();
+      return;
+    }
+    captureAndScan();
   };
 
   // Handle Barcode Photo Picked from Gallery
@@ -1201,20 +1227,26 @@ export default function ScannerScreen() {
 
           {/* 3:4 Holographic Frame for Nutrition Mode */}
           {!selectedImageUri && scanMode === "nutrition" && (
-            <View style={{
-              position: "absolute",
-              top: "7%",
-              left: "7%",
-              right: "7%",
-              bottom: "7%",
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.15)",
-              borderRadius: 20,
-              backgroundColor: "rgba(0,0,0,0.12)",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden"
-            }}>
+            <View
+              onLayout={(e) => {
+                const h = e.nativeEvent.layout.height;
+                if (h > 0) setNutritionFrameHeight(h);
+              }}
+              style={{
+                position: "absolute",
+                top: "7%",
+                left: "7%",
+                right: "7%",
+                bottom: "7%",
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.15)",
+                borderRadius: 20,
+                backgroundColor: "rgba(0,0,0,0.12)",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden"
+              }}
+            >
               {/* 4 Neon Corners */}
               <View style={{ position: "absolute", top: 0, left: 0, width: 26, height: 26, borderTopWidth: 3.5, borderLeftWidth: 3.5, borderColor: "#10B981", borderTopLeftRadius: 12 }} />
               <View style={{ position: "absolute", top: 0, right: 0, width: 26, height: 26, borderTopWidth: 3.5, borderRightWidth: 3.5, borderColor: "#10B981", borderTopRightRadius: 12 }} />
@@ -1222,19 +1254,41 @@ export default function ScannerScreen() {
               <View style={{ position: "absolute", bottom: 0, right: 0, width: 26, height: 26, borderBottomWidth: 3.5, borderRightWidth: 3.5, borderColor: "#10B981", borderBottomRightRadius: 12 }} />
 
               {/* Animated Laser Beam */}
-              <Animated.View style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 3,
-                backgroundColor: "#10B981",
-                shadowColor: "#10B981",
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 1,
-                shadowRadius: 10,
-                transform: [{ translateY: nutritionLaserY }]
-              }} />
+              <Animated.View
+                style={[
+                  {
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: 3,
+                    backgroundColor: "#10B981",
+                    shadowColor: "#10B981",
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 1,
+                    shadowRadius: 10,
+                    zIndex: 5,
+                    transform: Platform.OS === "web" ? undefined : [{ translateY: nutritionLaserY }]
+                  },
+                  Platform.OS === "web" && ({
+                    animation: "nutritionRadarScan 2.2s ease-in-out infinite",
+                    boxShadow: "0 0 14px #10B981, 0 0 4px #34D399"
+                  } as any)
+                ]}
+              >
+                {/* Glowing laser radar trail beam */}
+                <View
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    left: 0,
+                    right: 0,
+                    height: 15,
+                    backgroundColor: "rgba(16, 185, 129, 0.18)",
+                    borderRadius: 4
+                  }}
+                />
+              </Animated.View>
 
               {/* Live Detection Top Indicator */}
               <View style={{
@@ -1248,7 +1302,8 @@ export default function ScannerScreen() {
                 borderRadius: 12,
                 flexDirection: "row",
                 alignItems: "center",
-                gap: 6
+                gap: 6,
+                zIndex: 10
               }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isLiveAutoDetect ? "#10B981" : "#64748B" }} />
                 <Text style={{ color: isLiveAutoDetect ? "#34D399" : "#94A3B8", fontSize: 10, fontWeight: "800" }}>
@@ -1262,7 +1317,8 @@ export default function ScannerScreen() {
                 borderWidth: 1,
                 paddingHorizontal: 14,
                 paddingVertical: 6,
-                borderRadius: 14
+                borderRadius: 14,
+                zIndex: 10
               }}>
                 <Text style={{ color: "#F8FAFC", fontSize: 11, fontWeight: "700" }}>
                   {autoDetectProgress > 0 && autoDetectProgress < 100
@@ -1275,20 +1331,26 @@ export default function ScannerScreen() {
 
           {/* Compact Barcode Guide Slot for Barcode Mode */}
           {!selectedImageUri && scanMode === "barcode" && (
-            <View style={{
-              position: "absolute",
-              top: 14,
-              bottom: 14,
-              left: 14,
-              right: 14,
-              borderWidth: 1.5,
-              borderColor: "rgba(6, 182, 212, 0.45)",
-              borderRadius: 14,
-              backgroundColor: "rgba(0,0,0,0.15)",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden"
-            }}>
+            <View
+              onLayout={(e) => {
+                const h = e.nativeEvent.layout.height;
+                if (h > 0) setBarcodeFrameHeight(h);
+              }}
+              style={{
+                position: "absolute",
+                top: 14,
+                bottom: 14,
+                left: 14,
+                right: 14,
+                borderWidth: 1.5,
+                borderColor: "rgba(6, 182, 212, 0.45)",
+                borderRadius: 14,
+                backgroundColor: "rgba(0,0,0,0.15)",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden"
+              }}
+            >
               {/* Left & Right Barcode Guide Brackets */}
               <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 14, borderLeftWidth: 3.5, borderTopWidth: 3.5, borderBottomWidth: 3.5, borderColor: "#06B6D4", borderTopLeftRadius: 10, borderBottomLeftRadius: 10 }} />
               <View style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: 14, borderRightWidth: 3.5, borderTopWidth: 3.5, borderBottomWidth: 3.5, borderColor: "#06B6D4", borderTopRightRadius: 10, borderBottomRightRadius: 10 }} />
@@ -1306,7 +1368,8 @@ export default function ScannerScreen() {
                 borderRadius: 8,
                 flexDirection: "row",
                 alignItems: "center",
-                gap: 4
+                gap: 4,
+                zIndex: 10
               }}>
                 <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#06B6D4" }} />
                 <Text style={{ color: "#38BDF8", fontSize: 9, fontWeight: "900" }}>
@@ -1315,21 +1378,43 @@ export default function ScannerScreen() {
               </View>
 
               {/* Animated Barcode Red Laser */}
-              <Animated.View style={{
-                position: "absolute",
-                top: 0,
-                left: 10,
-                right: 10,
-                height: 2.5,
-                backgroundColor: "#EF4444",
-                shadowColor: "#EF4444",
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 1,
-                shadowRadius: 8,
-                transform: [{ translateY: barcodeLaserY }]
-              }} />
+              <Animated.View
+                style={[
+                  {
+                    position: "absolute",
+                    top: 0,
+                    left: 10,
+                    right: 10,
+                    height: 2.5,
+                    backgroundColor: "#EF4444",
+                    shadowColor: "#EF4444",
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 1,
+                    shadowRadius: 8,
+                    zIndex: 5,
+                    transform: Platform.OS === "web" ? undefined : [{ translateY: barcodeLaserY }]
+                  },
+                  Platform.OS === "web" && ({
+                    animation: "barcodeRadarScan 1.8s ease-in-out infinite",
+                    boxShadow: "0 0 14px #EF4444, 0 0 4px #F87171"
+                  } as any)
+                ]}
+              >
+                {/* Glowing red laser radar trail beam */}
+                <View
+                  style={{
+                    position: "absolute",
+                    top: -4,
+                    left: 0,
+                    right: 0,
+                    height: 10,
+                    backgroundColor: "rgba(239, 68, 68, 0.22)",
+                    borderRadius: 3
+                  }}
+                />
+              </Animated.View>
 
-              <View style={{ backgroundColor: "rgba(0,0,0,0.72)", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 }}>
+              <View style={{ backgroundColor: "rgba(0,0,0,0.72)", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10, zIndex: 10 }}>
                 <Text style={{ color: "#38BDF8", fontSize: 11, fontWeight: "800" }}>
                   ||||  Fit Barcode Inside Slot  ||||
                 </Text>
@@ -1551,8 +1636,8 @@ export default function ScannerScreen() {
         </View>
       </ScrollView>
 
-      {/* Global Bottom Navigation */}
-      <BottomNav />
+      {/* Global Bottom Navigation with Capture Trigger */}
+      <BottomNav onScanPress={handleBottomNavScanPress} />
     </View>
   );
 }
