@@ -1460,6 +1460,10 @@ def get_rapidocr_engine():
     try:
         from rapidocr_onnxruntime import RapidOCR
         _rapidocr_engine = RapidOCR()
+        try:
+            _rapidocr_engine.use_angle_cls = False
+        except Exception:
+            pass
         return _rapidocr_engine
     except ImportError as imp_err:
         _last_ocr_debug = f"RapidOCR ImportError: {imp_err}"
@@ -1517,14 +1521,14 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         elif is_blank:
             _last_ocr_debug = "blank_image: Image is almost solid white"
 
-        # 3. Adaptive scaling: keep high resolution (up to 1100px) with high-fidelity LANCZOS resampling (fast & accurate)
+        # 3. Adaptive scaling: keep optimal resolution (up to 800px) with high-fidelity LANCZOS resampling (fast & accurate)
         max_dim = max(img.width, img.height)
-        if max_dim > 1100:
-            scale = 1100.0 / max_dim
+        if max_dim > 800:
+            scale = 800.0 / max_dim
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
-        elif img.width < 500 and img.height < 500 and img.width > 20 and img.height > 20:
-            # Upscale small or low-resolution crops so tiny ingredient fonts become readable by OCR
-            scale = min(2.0, 900.0 / max(img.width, 1))
+        elif img.width < 450 and img.height < 450 and img.width > 20 and img.height > 20:
+            # Upscale tiny crops so small ingredient fonts become readable by OCR
+            scale = min(2.0, 750.0 / max(img.width, 1))
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
 
         # 4. Illumination & Contrast Normalization for uneven lighting, shadows, or dark shots
@@ -1580,7 +1584,7 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             arr = None
             try:
                 arr = np.array(pil_image.convert("RGB") if pil_image.mode != "RGB" else pil_image)
-                res, _ = ocr_engine(arr)
+                res, _ = ocr_engine(arr, box_thresh=0.6, text_score=0.55)
                 if res:
                     lines = [str(item[1]).strip() for item in res if item and len(item) > 1 and item[1]]
                     txt = _clean_ocr_tokens("\n".join(lines).strip())

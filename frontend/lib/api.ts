@@ -341,22 +341,45 @@ const isBrowser = typeof window !== "undefined";
 const isHttpsBrowser = isBrowser && window.location?.protocol === "https:";
 
 export const RENDER_CLOUD_URL = "https://nutrilens-jfiv.onrender.com/api";
-const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim() || RENDER_CLOUD_URL;
+const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
 
 export const getCandidateBaseUrls = (): string[] => {
-  return [CONFIGURED_API_URL, RENDER_CLOUD_URL].filter(Boolean);
+  const candidates: string[] = [];
+
+  // 1. Explicit environment variable always takes precedence if configured
+  if (CONFIGURED_API_URL) {
+    candidates.push(CONFIGURED_API_URL.replace(/\/$/, ""));
+  }
+
+  // 2. Localhost detection: if running on local dev machine/browser, prioritize local backend
+  if (isBrowser && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      candidates.push("http://localhost:8000/api");
+      candidates.push("http://127.0.0.1:8000/api");
+    }
+  }
+
+  // 3. Render cloud backend for production / deployed instances and fallback
+  if (!candidates.includes(RENDER_CLOUD_URL)) {
+    candidates.push(RENDER_CLOUD_URL);
+  }
+
+  return candidates;
 };
 
 export const CANDIDATE_BASE_URLS: string[] = getCandidateBaseUrls();
 
-let _cachedWorkingUrl: string | null = RENDER_CLOUD_URL;
+let _cachedWorkingUrl: string | null = null;
 
 export const resetCachedWorkingUrl = () => {
-  _cachedWorkingUrl = RENDER_CLOUD_URL;
+  _cachedWorkingUrl = null;
 };
 
 export const getApiBaseUrl = (): string => {
-  return RENDER_CLOUD_URL;
+  if (_cachedWorkingUrl) return _cachedWorkingUrl;
+  const candidates = getCandidateBaseUrls();
+  return candidates[0] || RENDER_CLOUD_URL;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -365,22 +388,25 @@ let _warmupStarted = false;
 let _warmupTimer: any = null;
 
 /**
- * Proactively wakes up the Render cloud backend in the background so that
+ * Proactively wakes up the backend in the background so that
  * when a user clicks 'Scan', the server is already active and warm.
- * Also keeps the free container awake every 4 minutes while the web app tab is open.
+ * Also keeps cloud container awake every 4 minutes while the web app tab is open.
  */
 export const warmupCloudBackend = () => {
   if (typeof window === "undefined") return;
 
   const ping = () => {
-    fetch("https://nutrilens-jfiv.onrender.com/health", { method: "GET", mode: "cors" })
+    // Ping health on candidate base URLs
+    const targetUrl = _cachedWorkingUrl || RENDER_CLOUD_URL;
+    const healthUrl = targetUrl.replace(/\/api$/, "") + "/health";
+    fetch(healthUrl, { method: "GET", mode: "cors" })
       .then((r) => {
         if (r.ok) {
-          console.log("[NutriLens Cloud] Backend is warm and operational.");
+          console.log("[NutriLens] Backend is warm and operational at " + targetUrl);
         }
       })
       .catch(() => {
-        console.log("[NutriLens Cloud] Wakeup ping dispatched to cloud container...");
+        console.log("[NutriLens] Wakeup ping dispatched to backend...");
       });
   };
 
@@ -399,7 +425,7 @@ export const warmupCloudBackend = () => {
 };
 
 /**
- * Resilient API fetcher for NutriLens Cloud Backend on Render.
+ * Resilient API fetcher for NutriLens Backend (Local + Render Cloud).
  * Supports automatic cold-start retries (HTTP 502/503/504) and generous timeout control
  * to gracefully handle Render free container spin-up and ML inference.
  */
@@ -426,7 +452,10 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
     headers: requestHeaders
   };
 
-  const urlsToTry: string[] = [RENDER_CLOUD_URL];
+  const candidates = getCandidateBaseUrls();
+  const urlsToTry: string[] = _cachedWorkingUrl
+    ? [_cachedWorkingUrl, ...candidates.filter((u) => u !== _cachedWorkingUrl)]
+    : candidates;
 
   let lastError: any = null;
   const isImageOrScanEndpoint = (
