@@ -22,6 +22,7 @@ import {
   extractOcrText,
   lookupBarcode,
   getApiBaseUrl,
+  resetCachedWorkingUrl,
   getActiveUserId,
   getSavedUserProfile,
   getUserProfile,
@@ -90,6 +91,7 @@ export default function ScannerScreen() {
 
   // Selected Image
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [lastCapturedBase64, setLastCapturedBase64] = useState<string | null>(null);
 
   const { userProfile: authProfile, userId } = useAuth();
 
@@ -483,6 +485,7 @@ export default function ScannerScreen() {
 
   // 5-Stage Simulation Progression + Backend API Call
   const runSimulationAndAnalyze = async (imageBase64: string) => {
+    setLastCapturedBase64(imageBase64);
     // Stage 1: SCANNING
     setScanStage("SCANNING");
     setSimulationStageIndex(0);
@@ -506,8 +509,8 @@ export default function ScannerScreen() {
       setScanStage("ANALYZING");
       setSimulationStageIndex(2);
 
-      // 45s safety timeout for cloud backend inference
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 45000));
+      // 65s safety timeout for cloud backend inference / cold start
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 65000));
 
       const response = await Promise.race([apiCall, timeoutPromise]);
 
@@ -519,7 +522,7 @@ export default function ScannerScreen() {
 
       if (!response) {
         setScanStage("IDLE");
-        setScanError("Scan analysis timed out. Retrying with local inference or check your network connection.");
+        setScanError("Scan analysis timed out while contacting backend. Please ensure the backend is running or tap 'Retry Scan'.");
         return;
       }
 
@@ -560,10 +563,12 @@ export default function ScannerScreen() {
         rawMsg.includes("Failed to connect") ||
         rawMsg.includes("Failed to fetch") ||
         rawMsg.includes("Network") ||
-        rawMsg.includes("network")
+        rawMsg.includes("network") ||
+        rawMsg.includes("abort") ||
+        rawMsg.includes("timeout")
       ) {
         setScanError(
-          `Backend connection failed. Please ensure your cloud backend (${getApiBaseUrl()}) is online or check your network connection.`
+          `Backend connection issue (${getApiBaseUrl()}). For instant offline scans, run the local backend server (uvicorn main:app --port 8000). Tap 'Retry Scan' to try again.`
         );
       } else {
         setScanError(
@@ -574,10 +579,22 @@ export default function ScannerScreen() {
   };
 
   const handleTryAgain = () => {
+    resetCachedWorkingUrl();
     setScanError(null);
     setSelectedImageUri(null);
+    setLastCapturedBase64(null);
     setScanStage("IDLE");
     startCamera();
+  };
+
+  const handleRetryScan = () => {
+    resetCachedWorkingUrl();
+    setScanError(null);
+    if (lastCapturedBase64) {
+      runSimulationAndAnalyze(lastCapturedBase64);
+    } else {
+      handleTryAgain();
+    }
   };
 
   const handleBottomNavScanPress = () => {
@@ -1045,7 +1062,7 @@ export default function ScannerScreen() {
                   {scanError.toLowerCase().includes("backend") ||
                   scanError.toLowerCase().includes("connect") ||
                   scanError.toLowerCase().includes("network")
-                    ? "Backend Server Offline"
+                    ? "Backend Server Connection"
                     : scanMode === "barcode"
                     ? "Barcode Not Detected"
                     : "Label Not Clearly Readable"}
@@ -1056,19 +1073,38 @@ export default function ScannerScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
-              onPress={handleTryAgain}
-              style={{
-                backgroundColor: "#EF4444",
-                paddingVertical: 10,
-                borderRadius: 12,
-                alignItems: "center"
-              }}
-            >
-              <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "800" }}>
-                🔄 Try Again
-              </Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {lastCapturedBase64 && (
+                <TouchableOpacity
+                  onPress={handleRetryScan}
+                  style={{
+                    flex: 1,
+                    backgroundColor: "#10B981",
+                    paddingVertical: 11,
+                    borderRadius: 12,
+                    alignItems: "center"
+                  }}
+                >
+                  <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "800" }}>
+                    ⚡ Retry Scan
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={handleTryAgain}
+                style={{
+                  flex: 1,
+                  backgroundColor: lastCapturedBase64 ? "#374151" : "#EF4444",
+                  paddingVertical: 11,
+                  borderRadius: 12,
+                  alignItems: "center"
+                }}
+              >
+                <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "800" }}>
+                  {lastCapturedBase64 ? "📷 Retake Photo" : "🔄 Try Again"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 

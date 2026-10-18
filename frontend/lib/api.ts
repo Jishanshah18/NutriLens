@@ -339,39 +339,64 @@ const FALLBACK_QUIZZES: QuizQuestion[] = [
 // Detect browser / dev environment
 const isBrowser = typeof window !== "undefined";
 const isHttpsBrowser = isBrowser && window.location?.protocol === "https:";
+const currentHostname = isBrowser ? (window.location?.hostname || "") : "";
 const isLocalhostEnv = isBrowser && (
-  window.location?.hostname === "localhost" ||
-  window.location?.hostname === "127.0.0.1" ||
-  window.location?.hostname === "::1"
+  currentHostname === "localhost" ||
+  currentHostname === "127.0.0.1" ||
+  currentHostname === "::1" ||
+  currentHostname.startsWith("192.168.") ||
+  currentHostname.startsWith("10.") ||
+  currentHostname.startsWith("172.")
 );
 
 const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
 const RENDER_CLOUD_URL = "https://nutrilens-jfiv.onrender.com/api";
 
-// Candidate backend URLs in priority order:
-// In localhost/dev environment: prioritize local backend (0 latency) then cloud failover
-// In production web/mobile: prioritize configured URL and cloud
-const CANDIDATE_BASE_URLS: string[] = isLocalhostEnv
-  ? [
-      "http://127.0.0.1:8000/api",
-      "http://localhost:8000/api",
-      CONFIGURED_API_URL,
-      RENDER_CLOUD_URL
-    ].filter(Boolean) as string[]
-  : [
-      CONFIGURED_API_URL,
-      RENDER_CLOUD_URL,
-      "http://127.0.0.1:8000/api",
-      "http://localhost:8000/api"
-    ].filter(Boolean) as string[];
+export const getCandidateBaseUrls = (): string[] => {
+  const list: string[] = [];
+
+  // 1. If accessed over LAN (e.g. phone or browser on 192.168.x or 172.x), try host's local backend
+  if (isBrowser && currentHostname && currentHostname !== "localhost" && currentHostname !== "127.0.0.1") {
+    if (currentHostname.startsWith("192.168.") || currentHostname.startsWith("10.") || currentHostname.startsWith("172.")) {
+      list.push(`http://${currentHostname}:8000/api`);
+    }
+  }
+
+  // 2. In local dev environment: prioritize local backend (0 latency, offline capable)
+  if (isLocalhostEnv) {
+    list.push("http://127.0.0.1:8000/api");
+    list.push("http://localhost:8000/api");
+  }
+
+  // 3. Configured API URL and Cloud failover
+  if (CONFIGURED_API_URL && !list.includes(CONFIGURED_API_URL)) {
+    list.push(CONFIGURED_API_URL);
+  }
+  if (!list.includes(RENDER_CLOUD_URL)) {
+    list.push(RENDER_CLOUD_URL);
+  }
+
+  // 4. In production environments, add local backends as final fallback
+  if (!isLocalhostEnv) {
+    if (!list.includes("http://127.0.0.1:8000/api")) list.push("http://127.0.0.1:8000/api");
+    if (!list.includes("http://localhost:8000/api")) list.push("http://localhost:8000/api");
+  }
+
+  return list.filter(Boolean);
+};
+
+export const CANDIDATE_BASE_URLS: string[] = getCandidateBaseUrls();
 
 let _cachedWorkingUrl: string | null = null;
 
+export const resetCachedWorkingUrl = () => {
+  _cachedWorkingUrl = null;
+};
+
 export const getApiBaseUrl = (): string => {
   if (_cachedWorkingUrl) return _cachedWorkingUrl;
-  if (isLocalhostEnv) return "http://127.0.0.1:8000/api";
-  if (CONFIGURED_API_URL) return CONFIGURED_API_URL;
-  return RENDER_CLOUD_URL;
+  const candidates = getCandidateBaseUrls();
+  return candidates[0] || RENDER_CLOUD_URL;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -408,7 +433,7 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
   if (_cachedWorkingUrl) {
     urlsToTry.push(_cachedWorkingUrl);
   }
-  for (const candidate of CANDIDATE_BASE_URLS) {
+  for (const candidate of getCandidateBaseUrls()) {
     const cleanCandidate = candidate.replace(/\/+$/, "");
     if (!urlsToTry.includes(cleanCandidate)) {
       urlsToTry.push(cleanCandidate);
@@ -426,8 +451,14 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
     try {
       const fullUrl = `${baseUrl}${cleanEndpoint}`;
       const controller = new AbortController();
-      // Allow up to 35s for heavy image OCR / ML classification; 8s for simple GET health checks
-      const timeoutMs = isImageOrScanEndpoint ? 35000 : (options.method === "GET" ? 8000 : 15000);
+
+      // Cloud Render backend cold-starts / model loads can take 45-60s on free containers.
+      // Local backend (localhost/127.0.0.1) takes <2s, so allow up to 12s.
+      const isLocalUrl = baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost") || (currentHostname && baseUrl.includes(currentHostname));
+      const timeoutMs = isImageOrScanEndpoint
+        ? (isLocalUrl ? 12000 : 65000)
+        : (options.method === "GET" ? 6000 : 15000);
+
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(fullUrl, {
@@ -444,7 +475,10 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
       }
     } catch (err: any) {
       lastError = err;
-      // Network failure or timeout on this URL; seamlessly try next candidate
+      // If current cached URL failed, invalidate cache so failover activates
+      if (_cachedWorkingUrl === baseUrl) {
+        _cachedWorkingUrl = null;
+      }
     }
   }
 

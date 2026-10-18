@@ -1517,14 +1517,14 @@ def extract_text_from_image_base64(image_base64: str) -> str:
         elif is_blank:
             _last_ocr_debug = "blank_image: Image is almost solid white"
 
-        # 3. Adaptive scaling: keep high resolution (up to 1800px) with high-fidelity LANCZOS resampling
+        # 3. Adaptive scaling: keep high resolution (up to 1100px) with high-fidelity LANCZOS resampling (fast & accurate)
         max_dim = max(img.width, img.height)
-        if max_dim > 1800:
-            scale = 1800.0 / max_dim
+        if max_dim > 1100:
+            scale = 1100.0 / max_dim
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
-        elif img.width < 750 and img.height < 750 and img.width > 0:
+        elif img.width < 500 and img.height < 500 and img.width > 20 and img.height > 20:
             # Upscale small or low-resolution crops so tiny ingredient fonts become readable by OCR
-            scale = min(2.0, 1400.0 / max(img.width, 1))
+            scale = min(2.0, 900.0 / max(img.width, 1))
             img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
 
         # 4. Illumination & Contrast Normalization for uneven lighting, shadows, or dark shots
@@ -1598,10 +1598,18 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             t1, s1, fc1, nc1, l1 = _run_engine(img)
             if s1 > best_score:
                 best_text, best_score, best_food_count, best_nutri_count = t1, s1, fc1, nc1
-                collected_lines.extend(l1)
+                for line in l1:
+                    cl = line.strip()
+                    if cl and cl.lower() not in [x.lower() for x in collected_lines]:
+                        collected_lines.append(cl)
 
-            # High-confidence early check: If Pass 1 found a rich ingredient/nutrition panel, return early
-            has_rich_data = (best_food_count >= 5 or (best_food_count >= 2 and best_nutri_count >= 2)) and len(best_text.split()) >= 25
+            # High-confidence early check: If Pass 1 found a readable ingredient list or nutrition panel, return immediately
+            has_rich_data = (
+                best_score >= 35 or
+                best_nutri_count >= 1 or
+                best_food_count >= 2 or
+                (len(best_text.split()) >= 6 and (best_food_count >= 1 or best_nutri_count >= 1))
+            )
             if not has_rich_data:
                 # Pass 2: Unsharp Mask Deblurring & Contrast Enhancement (fixes soft focus / motion blur)
                 try:
@@ -1611,16 +1619,20 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                     t2, s2, fc2, nc2, l2 = _run_engine(sharp_img)
                     if s2 > best_score:
                         best_text, best_score, best_food_count, best_nutri_count = t2, s2, fc2, nc2
-                    # Accumulate any new readable lines from sharpened pass
                     for line in l2:
-                        if line not in collected_lines:
-                            collected_lines.append(line)
+                        cl = line.strip()
+                        if cl and cl.lower() not in [x.lower() for x in collected_lines]:
+                            collected_lines.append(cl)
                     del sharp_img
                 except Exception:
                     pass
 
-                # Pass 3: CLAHE Adaptive Contrast (fixes plastic reflections, glare, and harsh shadows)
-                if best_score < 30 or best_food_count < 2:
+                # Rotation passes (180°, 90°, 270°) ONLY if the upright image found NO recognizable text
+                # Prevents massive 50s delays on normal upright photos
+                is_completely_unreadable = (best_score < 20 and best_food_count == 0 and best_nutri_count == 0 and len(best_text.split()) < 3)
+
+                if is_completely_unreadable:
+                    # Pass 3: CLAHE Adaptive Contrast (fixes glare & harsh shadows on faint labels)
                     try:
                         gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
                         clahe = cv2.createCLAHE(clipLimit=2.8, tileGridSize=(8, 8))
@@ -1632,13 +1644,13 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                         if s3 > best_score:
                             best_text, best_score, best_food_count, best_nutri_count = t3, s3, fc3, nc3
                         for line in l3:
-                            if line not in collected_lines:
-                                collected_lines.append(line)
+                            cl = line.strip()
+                            if cl and cl.lower() not in [x.lower() for x in collected_lines]:
+                                collected_lines.append(cl)
                     except Exception:
                         pass
 
-                # Pass 4: 180° Inverted Orientation Check (Upside-down photo / camera flipped)
-                if best_score < 30 or best_food_count < 2:
+                    # Pass 4: 180° Inverted Orientation Check
                     try:
                         rot180 = img.rotate(180, expand=True)
                         t180, s180, fc180, nc180, l180 = _run_engine(rot180)
@@ -1646,47 +1658,53 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                         if s180 > best_score:
                             best_text, best_score, best_food_count, best_nutri_count = t180, s180, fc180, nc180
                         for line in l180:
-                            if line not in collected_lines:
-                                collected_lines.append(line)
+                            cl = line.strip()
+                            if cl and cl.lower() not in [x.lower() for x in collected_lines]:
+                                collected_lines.append(cl)
                     except Exception:
                         pass
 
-                # Pass 5: 90° Clockwise Rotation Check (Side panel / vertical ingredient list)
-                if best_score < 35 or best_food_count < 3:
-                    try:
-                        rot90 = img.rotate(90, expand=True)
-                        t90, s90, fc90, nc90, l90 = _run_engine(rot90)
-                        del rot90
-                        if s90 > best_score:
-                            best_text, best_score, best_food_count, best_nutri_count = t90, s90, fc90, nc90
-                        for line in l90:
-                            if line not in collected_lines:
-                                collected_lines.append(line)
-                    except Exception:
-                        pass
+                    # Pass 5: 90° Clockwise Rotation Check
+                    if best_score < 25:
+                        try:
+                            rot90 = img.rotate(90, expand=True)
+                            t90, s90, fc90, nc90, l90 = _run_engine(rot90)
+                            del rot90
+                            if s90 > best_score:
+                                best_text, best_score, best_food_count, best_nutri_count = t90, s90, fc90, nc90
+                            for line in l90:
+                                cl = line.strip()
+                                if cl and cl.lower() not in [x.lower() for x in collected_lines]:
+                                    collected_lines.append(cl)
+                        except Exception:
+                            pass
 
-                # Pass 6: 270° Counter-Clockwise Rotation Check (Opposite side panel)
-                if best_score < 35 or best_food_count < 3:
-                    try:
-                        rot270 = img.rotate(270, expand=True)
-                        t270, s270, fc270, nc270, l270 = _run_engine(rot270)
-                        del rot270
-                        if s270 > best_score:
-                            best_text, best_score, best_food_count, best_nutri_count = t270, s270, fc270, nc270
-                        for line in l270:
-                            if line not in collected_lines:
-                                collected_lines.append(line)
-                    except Exception:
-                        pass
+                    # Pass 6: 270° Counter-Clockwise Rotation Check
+                    if best_score < 25:
+                        try:
+                            rot270 = img.rotate(270, expand=True)
+                            t270, s270, fc270, nc270, l270 = _run_engine(rot270)
+                            del rot270
+                            if s270 > best_score:
+                                best_text, best_score, best_food_count, best_nutri_count = t270, s270, fc270, nc270
+                            for line in l270:
+                                cl = line.strip()
+                                if cl and cl.lower() not in [x.lower() for x in collected_lines]:
+                                    collected_lines.append(cl)
+                        except Exception:
+                            pass
 
             # Smart merge: If collected distinct lines contain food tokens or nutrition facts
-            # that were missing from best_text, merge them so no ingredients are missed
-            if collected_lines and len(collected_lines) > len(best_text.splitlines()):
-                merged_txt = _clean_ocr_tokens("\n".join(collected_lines).strip())
-                sc_merged, fc_merged, _ = _score_text(merged_txt)
-                if fc_merged >= best_food_count:
-                    best_text = merged_txt
-                    best_score = sc_merged
+            # that were missing from best_text, merge unique lines without duplicating
+            if collected_lines:
+                existing_lower = {line.lower().strip() for line in best_text.splitlines() if line.strip()}
+                new_unique_lines = [l for l in collected_lines if l.lower().strip() not in existing_lower]
+                if new_unique_lines:
+                    merged_txt = _clean_ocr_tokens("\n".join(best_text.splitlines() + new_unique_lines).strip())
+                    sc_merged, fc_merged, _ = _score_text(merged_txt)
+                    if sc_merged >= best_score:
+                        best_text = merged_txt
+                        best_score = sc_merged
 
             if best_text and (best_score >= 8 or len(best_text.split()) >= 2):
                 import gc; gc.collect()
