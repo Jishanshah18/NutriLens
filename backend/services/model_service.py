@@ -1789,11 +1789,16 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
         text_lower = extracted_text.lower()
         word_count = len(extracted_text.split())
 
-        # Check if matched in product catalog or iconic brand map
+        from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS, FOOD_HEADING_PATTERNS, NON_FOOD_INDICATORS
+
+        # If strong non-food keywords are present (e.g. invoice, receipt, hardware, textiles), never override to food!
+        has_non_food = any(re.search(r'\b' + re.escape(nf) + r'\b', text_lower) for nf in NON_FOOD_INDICATORS)
         catalog_match = _find_catalog_match(extracted_text)
 
-        # Check if ANY food-related tokens exist in the text (supports boundary and substring matching)
-        from services.food_classifier import FOOD_INGREDIENT_TOKENS, NUTRITION_FACTS_TERMS, FOOD_HEADING_PATTERNS
+        if has_non_food and not catalog_match:
+            return res
+
+        # Check if ANY genuine food-related tokens exist in the text
         food_hits = [w for w in FOOD_INGREDIENT_TOKENS if re.search(r'\b' + re.escape(w) + r'\b', text_lower) or (len(w) >= 4 and w in text_lower)]
         nutrition_hits = [t for t in NUTRITION_FACTS_TERMS if t in text_lower]
         heading_hits = [p for p in FOOD_HEADING_PATTERNS if re.search(p, text_lower)]
@@ -1801,8 +1806,7 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
         # Check for common packaging measurements and food keywords
         has_weight = bool(re.search(r'\b\d+\s*(?:g|gm|gms|kg|ml|l|oz|lb)\b', text_lower))
         has_kcal = bool(re.search(r'\b\d+\s*(?:kcal|kj|cal)\b', text_lower))
-        has_percent = bool(re.search(r'\d+\s*%', text_lower))
-        has_pkg_words = bool(re.search(r'\b(ingredients?|energy|calories|fat|protein|carbs?|sugar|sodium|salt|flour|oil|water|milk|fssai|serving|mfg|batch|net|pkd|lic)\b', text_lower))
+        has_pkg_words = bool(re.search(r'\b(ingredients?|energy|calories|fat|protein|carbs?|sugar|sodium|salt|flour|oil|water|milk|fssai|serving)\b', text_lower))
 
         is_likely_food = (
             catalog_match is not None
@@ -1810,13 +1814,11 @@ def analyze_label_image(image_base64: str, user_profile: Optional[UserProfile] =
             or len(nutrition_hits) >= 1
             or len(heading_hits) >= 1
             or has_kcal
-            or has_pkg_words
+            or (has_pkg_words and word_count >= 2)
             or (has_weight and word_count >= 2)
-            or (has_percent and word_count >= 3)
-            or word_count >= 4
         )
 
-        if is_likely_food:
+        if is_likely_food and not has_non_food:
             # Force re-analysis treating it as food
             cleaned_text = clean_ingredient_text(extracted_text)
 

@@ -708,26 +708,12 @@ def lookup_barcode_online(barcode: str, timeout_seconds: float = 3.5) -> Dict[st
         except Exception:
             continue
 
-    # Step 4: Intelligent GS1 Fallback for any valid barcode (NEVER return is_food: False)
-    country = resolve_gs1_country(clean_code)
+    # Step 4: Truthful Not-Found response (Never invent or fabricate nutrition facts)
     return {
-        "found": True,
-        "is_food": True,
+        "found": False,
+        "is_food": False,
         "barcode": clean_code,
-        "product_name": f"Packaged Food Item (GTIN {clean_code})",
-        "brand": f"GS1 {country} Registered",
-        "category": "Packaged Food / FMCG",
-        "ingredients_text": f"Packaged consumer food item registered under GS1 {country} barcode standards ({clean_code}).",
-        "nova_group": 3,
-        "health_score": 62,
-        "nutriments": {
-            "calories": 290.0,
-            "protein_g": 6.0,
-            "carbs_g": 42.0,
-            "fat_g": 10.5,
-            "sugar_g": 7.5,
-            "sodium_mg": 380.0
-        },
-        "source": f"GS1 {country} Global Barcode Registry"
+        "message": f"Barcode {clean_code} is not yet registered in the verified food databases. Tip: Switch to 'Food Label' mode to scan the ingredients list directly."
     }
+
 
