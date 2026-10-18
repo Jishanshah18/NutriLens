@@ -279,30 +279,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Listen to Firebase auth state changes
   useEffect(() => {
     let isMounted = true;
+    let unsubscribe = () => {};
 
-    // Listen to Firebase auth state changes
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (isMounted) {
-        handleFirebaseUser(user);
+    if (auth && typeof onAuthStateChanged === "function") {
+      try {
+        unsubscribe = onAuthStateChanged(auth, (user) => {
+          if (isMounted) {
+            handleFirebaseUser(user);
+          }
+        });
+      } catch (e) {
+        console.warn("Notice: onAuthStateChanged error:", e);
+        setIsLoading(false);
       }
-    });
+    } else {
+      setIsLoading(false);
+    }
 
     // Check for redirect result from Google OAuth redirect flow
-    if (typeof window !== "undefined") {
-      getRedirectResult(auth)
-        .then((cred) => {
-          if (cred?.user && isMounted) {
-            handleFirebaseUser(cred.user);
-          }
-        })
-        .catch((e) => {
-          console.warn("Notice checking Google redirect result:", e);
-        });
+    if (typeof window !== "undefined" && auth && typeof getRedirectResult === "function") {
+      try {
+        getRedirectResult(auth)
+          .then((cred) => {
+            if (cred?.user && isMounted) {
+              handleFirebaseUser(cred.user);
+            }
+          })
+          .catch((e) => {
+            console.warn("Notice checking Google redirect result:", e);
+          });
+      } catch (e) {}
     }
 
     return () => {
       isMounted = false;
-      unsubscribe();
+      try {
+        unsubscribe();
+      } catch (e) {}
     };
   }, [handleFirebaseUser]);
 

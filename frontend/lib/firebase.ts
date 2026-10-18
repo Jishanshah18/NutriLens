@@ -38,17 +38,25 @@ export const isFirebaseConfigured = (): boolean => {
   );
 };
 
-// Initialize Firebase App singleton
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+// Initialize Firebase App and Auth safely
+let appInstance: any = null;
+let authInstance: any = null;
+let googleProviderInstance: any = null;
 
-// Initialize Auth
-export const auth = getAuth(app);
+try {
+  appInstance = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  authInstance = getAuth(appInstance);
+  googleProviderInstance = new GoogleAuthProvider();
+  googleProviderInstance.setCustomParameters({
+    prompt: "select_account"
+  });
+} catch (e) {
+  console.warn("Firebase client initialization notice:", e);
+}
 
-// Google Sign-In Provider
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({
-  prompt: "select_account"
-});
+export const app = appInstance;
+export const auth = authInstance;
+export const googleProvider = googleProviderInstance;
 
 /**
  * Human-friendly Firebase error message translator.
