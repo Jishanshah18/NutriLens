@@ -25,7 +25,14 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   );
 }
 
+import { useEffect } from "react";
+import { warmupCloudBackend } from "../lib/api";
+
 export default function Layout() {
+  useEffect(() => {
+    warmupCloudBackend();
+  }, []);
+
   return (
     <ThemeProvider>
       <AuthProvider>

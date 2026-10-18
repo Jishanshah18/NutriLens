@@ -1594,7 +1594,7 @@ def extract_text_from_image_base64(image_base64: str) -> str:
             return "", 0, 0, 0, []
 
         if ocr_engine is not None:
-            # Pass 1: Original upright image (0°)
+            # Pass 1: Original upright image (0°) - Fast direct inference
             t1, s1, fc1, nc1, l1 = _run_engine(img)
             if s1 > best_score:
                 best_text, best_score, best_food_count, best_nutri_count = t1, s1, fc1, nc1
@@ -1603,39 +1603,57 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                     if cl and cl.lower() not in [x.lower() for x in collected_lines]:
                         collected_lines.append(cl)
 
-            # High-confidence early check: If Pass 1 found a readable ingredient list or nutrition panel, return immediately
-            has_rich_data = (
-                best_score >= 35 or
-                best_nutri_count >= 1 or
-                best_food_count >= 2 or
-                (len(best_text.split()) >= 6 and (best_food_count >= 1 or best_nutri_count >= 1))
-            )
-            if not has_rich_data:
-                # Pass 2: Unsharp Mask Deblurring & Contrast Enhancement (fixes soft focus / motion blur)
+            # High-speed early exit: If Pass 1 extracted readable tokens (>= 3 words) or any food/nutrition token,
+            # the packaging is upright and legible. Return immediately to prevent slow multi-pass delays on cloud instances!
+            words_pass1 = len(best_text.split())
+            if (words_pass1 >= 3 or best_food_count >= 1 or best_nutri_count >= 1 or best_score >= 12):
+                import gc; gc.collect()
+                return best_text
+
+            # Pass 2: Unsharp Mask Deblurring & Contrast Enhancement (only for blurry / low-contrast text)
+            try:
+                sharp_img = img.filter(ImageFilter.UnsharpMask(radius=2.0, percent=200, threshold=2))
+                enhancer = ImageEnhance.Contrast(sharp_img)
+                sharp_img = enhancer.enhance(1.25)
+                t2, s2, fc2, nc2, l2 = _run_engine(sharp_img)
+                if s2 > best_score:
+                    best_text, best_score, best_food_count, best_nutri_count = t2, s2, fc2, nc2
+                for line in l2:
+                    cl = line.strip()
+                    if cl and cl.lower() not in [x.lower() for x in collected_lines]:
+                        collected_lines.append(cl)
+                del sharp_img
+            except Exception:
+                pass
+
+            words_pass2 = len(best_text.split())
+            if (words_pass2 >= 3 or best_food_count >= 1 or best_nutri_count >= 1 or best_score >= 12):
+                import gc; gc.collect()
+                return best_text
+
+            # Only check orientation inversion (180°) if the image yielded almost zero text (< 2 words)
+            is_completely_unreadable = (best_score < 10 and best_food_count == 0 and best_nutri_count == 0 and words_pass2 < 2)
+
+            if is_completely_unreadable:
+                # Pass 3: 180° Inverted Orientation Check (in case photo was captured upside down)
                 try:
-                    sharp_img = img.filter(ImageFilter.UnsharpMask(radius=2.2, percent=220, threshold=2))
-                    enhancer = ImageEnhance.Contrast(sharp_img)
-                    sharp_img = enhancer.enhance(1.25)
-                    t2, s2, fc2, nc2, l2 = _run_engine(sharp_img)
-                    if s2 > best_score:
-                        best_text, best_score, best_food_count, best_nutri_count = t2, s2, fc2, nc2
-                    for line in l2:
+                    rot180 = img.rotate(180, expand=True)
+                    t180, s180, fc180, nc180, l180 = _run_engine(rot180)
+                    del rot180
+                    if s180 > best_score:
+                        best_text, best_score, best_food_count, best_nutri_count = t180, s180, fc180, nc180
+                    for line in l180:
                         cl = line.strip()
                         if cl and cl.lower() not in [x.lower() for x in collected_lines]:
                             collected_lines.append(cl)
-                    del sharp_img
                 except Exception:
                     pass
 
-                # Rotation passes (180°, 90°, 270°) ONLY if the upright image found NO recognizable text
-                # Prevents massive 50s delays on normal upright photos
-                is_completely_unreadable = (best_score < 20 and best_food_count == 0 and best_nutri_count == 0 and len(best_text.split()) < 3)
-
-                if is_completely_unreadable:
-                    # Pass 3: CLAHE Adaptive Contrast (fixes glare & harsh shadows on faint labels)
+                # If still zero text, attempt CLAHE contrast as final resort
+                if best_score < 10 and len(best_text.split()) < 2:
                     try:
                         gray_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-                        clahe = cv2.createCLAHE(clipLimit=2.8, tileGridSize=(8, 8))
+                        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
                         clahe_arr = clahe.apply(gray_cv)
                         gray_clahe = Image.fromarray(clahe_arr)
                         del gray_cv, clahe, clahe_arr
@@ -1650,52 +1668,7 @@ def extract_text_from_image_base64(image_base64: str) -> str:
                     except Exception:
                         pass
 
-                    # Pass 4: 180° Inverted Orientation Check
-                    try:
-                        rot180 = img.rotate(180, expand=True)
-                        t180, s180, fc180, nc180, l180 = _run_engine(rot180)
-                        del rot180
-                        if s180 > best_score:
-                            best_text, best_score, best_food_count, best_nutri_count = t180, s180, fc180, nc180
-                        for line in l180:
-                            cl = line.strip()
-                            if cl and cl.lower() not in [x.lower() for x in collected_lines]:
-                                collected_lines.append(cl)
-                    except Exception:
-                        pass
-
-                    # Pass 5: 90° Clockwise Rotation Check
-                    if best_score < 25:
-                        try:
-                            rot90 = img.rotate(90, expand=True)
-                            t90, s90, fc90, nc90, l90 = _run_engine(rot90)
-                            del rot90
-                            if s90 > best_score:
-                                best_text, best_score, best_food_count, best_nutri_count = t90, s90, fc90, nc90
-                            for line in l90:
-                                cl = line.strip()
-                                if cl and cl.lower() not in [x.lower() for x in collected_lines]:
-                                    collected_lines.append(cl)
-                        except Exception:
-                            pass
-
-                    # Pass 6: 270° Counter-Clockwise Rotation Check
-                    if best_score < 25:
-                        try:
-                            rot270 = img.rotate(270, expand=True)
-                            t270, s270, fc270, nc270, l270 = _run_engine(rot270)
-                            del rot270
-                            if s270 > best_score:
-                                best_text, best_score, best_food_count, best_nutri_count = t270, s270, fc270, nc270
-                            for line in l270:
-                                cl = line.strip()
-                                if cl and cl.lower() not in [x.lower() for x in collected_lines]:
-                                    collected_lines.append(cl)
-                        except Exception:
-                            pass
-
             # Smart merge: If collected distinct lines contain food tokens or nutrition facts
-            # that were missing from best_text, merge unique lines without duplicating
             if collected_lines:
                 existing_lower = {line.lower().strip() for line in best_text.splitlines() if line.strip()}
                 new_unique_lines = [l for l in collected_lines if l.lower().strip() not in existing_lower]

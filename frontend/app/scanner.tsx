@@ -23,6 +23,7 @@ import {
   lookupBarcode,
   getApiBaseUrl,
   resetCachedWorkingUrl,
+  warmupCloudBackend,
   getActiveUserId,
   getSavedUserProfile,
   getUserProfile,
@@ -30,6 +31,7 @@ import {
   AnalyzeResponse,
   PersonalizedRecommendation
 } from "../lib/api";
+import { optimizeImageForScan } from "../lib/imageOptimizer";
 import { useTheme } from "../lib/ThemeContext";
 import { useAuth } from "../lib/AuthContext";
 import { ScanningOverlay } from "../components/ScanningOverlay";
@@ -137,7 +139,8 @@ export default function ScannerScreen() {
     );
     animLoop.start();
 
-    // Load active user profile
+    // Warm up cloud backend container and load active profile
+    warmupCloudBackend();
     loadActiveProfile();
 
     return () => {
@@ -401,24 +404,26 @@ export default function ScannerScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
         allowsEditing: false,
-        quality: 0.85,
+        quality: 0.80,
         base64: true
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        setSelectedImageUri(asset.uri);
-
-        let b64 = asset.base64 || "";
-        if (!b64 && asset.uri) {
-          b64 = await uriToBase64(asset.uri);
+        let rawSource = asset.uri || "";
+        if (asset.base64) {
+          rawSource = `data:image/jpeg;base64,${asset.base64}`;
         }
 
-        if (b64) {
+        // Optimize client-side to max 1024px and compact ~150KB JPEG for fast cloud OCR
+        const optimized = await optimizeImageForScan(rawSource, 1024, 0.80);
+        setSelectedImageUri(optimized.dataUrl);
+
+        if (optimized.base64) {
           if (scanMode === "barcode") {
-            handleBarcodeImageUpload(b64, asset.uri);
+            handleBarcodeImageUpload(optimized.base64, optimized.dataUrl);
           } else {
-            runSimulationAndAnalyze(b64);
+            runSimulationAndAnalyze(optimized.base64);
           }
         }
       }
@@ -443,12 +448,22 @@ export default function ScannerScreen() {
         }
 
         const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        let w = video.videoWidth;
+        let h = video.videoHeight;
+        const maxDim = Math.max(w, h);
+        if (maxDim > 1024) {
+          const scale = 1024 / maxDim;
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        canvas.width = w;
+        canvas.height = h;
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(video, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.80);
           capturedBase64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
           setSelectedImageUri(dataUrl);
           stopCamera();
@@ -462,12 +477,14 @@ export default function ScannerScreen() {
       try {
         if (cameraRef.current) {
           const photo = await cameraRef.current.takePictureAsync({
-            quality: 0.95,
+            quality: 0.75,
             base64: true
           });
           if (photo && photo.uri) {
             setSelectedImageUri(photo.uri);
-            capturedBase64 = photo.base64 || (await uriToBase64(photo.uri));
+            const rawB64 = photo.base64 || (await uriToBase64(photo.uri));
+            const optimized = await optimizeImageForScan(rawB64, 1024, 0.80);
+            capturedBase64 = optimized.base64;
             setIsCameraActive(false);
           }
         }
@@ -565,10 +582,12 @@ export default function ScannerScreen() {
         rawMsg.includes("Network") ||
         rawMsg.includes("network") ||
         rawMsg.includes("abort") ||
-        rawMsg.includes("timeout")
+        rawMsg.includes("timeout") ||
+        rawMsg.includes("spinning up") ||
+        rawMsg.includes("waking up")
       ) {
         setScanError(
-          `Unable to connect to cloud backend (${getApiBaseUrl()}). The hosted server may be waking up. Tap '⚡ Retry Scan' in a few seconds.`
+          `Unable to connect to cloud backend (${getApiBaseUrl()}). The free Render server may be waking up from sleep. Tap '⚡ Retry Scan' — it will connect once awake.`
         );
       } else {
         setScanError(
@@ -590,6 +609,7 @@ export default function ScannerScreen() {
   const handleRetryScan = () => {
     resetCachedWorkingUrl();
     setScanError(null);
+    warmupCloudBackend();
     if (lastCapturedBase64) {
       runSimulationAndAnalyze(lastCapturedBase64);
     } else {
@@ -815,14 +835,15 @@ export default function ScannerScreen() {
       try {
         if (cameraRef.current) {
           const photo = await cameraRef.current.takePictureAsync({
-            quality: 0.9,
+            quality: 0.75,
             base64: true
           });
           if (photo && photo.uri) {
             setSelectedImageUri(photo.uri);
-            const b64 = photo.base64 || (await uriToBase64(photo.uri));
-            if (b64) {
-              handleBarcodeImageUpload(b64, photo.uri);
+            const rawB64 = photo.base64 || (await uriToBase64(photo.uri));
+            const optimized = await optimizeImageForScan(rawB64, 1024, 0.80);
+            if (optimized.base64) {
+              handleBarcodeImageUpload(optimized.base64, optimized.dataUrl);
               return;
             }
           }

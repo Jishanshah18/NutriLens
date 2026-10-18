@@ -361,9 +361,47 @@ export const getApiBaseUrl = (): string => {
 
 export const API_BASE_URL = getApiBaseUrl();
 
+let _warmupStarted = false;
+let _warmupTimer: any = null;
+
+/**
+ * Proactively wakes up the Render cloud backend in the background so that
+ * when a user clicks 'Scan', the server is already active and warm.
+ * Also keeps the free container awake every 4 minutes while the web app tab is open.
+ */
+export const warmupCloudBackend = () => {
+  if (typeof window === "undefined") return;
+
+  const ping = () => {
+    fetch("https://nutrilens-jfiv.onrender.com/health", { method: "GET", mode: "cors" })
+      .then((r) => {
+        if (r.ok) {
+          console.log("[NutriLens Cloud] Backend is warm and operational.");
+        }
+      })
+      .catch(() => {
+        console.log("[NutriLens Cloud] Wakeup ping dispatched to cloud container...");
+      });
+  };
+
+  if (!_warmupStarted) {
+    _warmupStarted = true;
+    ping();
+  }
+
+  if (!_warmupTimer) {
+    _warmupTimer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        ping();
+      }
+    }, 4 * 60 * 1000);
+  }
+};
+
 /**
  * Resilient API fetcher for NutriLens Cloud Backend on Render.
- * Supports generous timeout control to gracefully handle Render free container cold starts and inference.
+ * Supports automatic cold-start retries (HTTP 502/503/504) and generous timeout control
+ * to gracefully handle Render free container spin-up and ML inference.
  */
 export async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -397,33 +435,57 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
     cleanEndpoint.includes("barcode")
   );
 
-  for (const baseUrl of urlsToTry) {
-    try {
-      const fullUrl = `${baseUrl}${cleanEndpoint}`;
-      const controller = new AbortController();
+  const maxAttempts = isImageOrScanEndpoint ? 2 : 1;
 
-      // Cloud Render backend cold-starts / model loads can take 30-50s on free containers.
-      // Allow up to 80s for image OCR and ML classification so requests never get aborted prematurely.
-      const timeoutMs = isImageOrScanEndpoint
-        ? 80000
-        : (options.method === "GET" ? 15000 : 25000);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (const baseUrl of urlsToTry) {
+      try {
+        const fullUrl = `${baseUrl}${cleanEndpoint}`;
+        const controller = new AbortController();
 
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        // Render free containers take 30-50s to wake up on cold starts.
+        // Set timeout to 85s for scan endpoints so inference never gets aborted prematurely.
+        const timeoutMs = isImageOrScanEndpoint
+          ? 85000
+          : (options.method === "GET" ? 15000 : 25000);
 
-      const response = await fetch(fullUrl, {
-        ...mergedOptions,
-        signal: controller.signal
-      });
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      clearTimeout(timeoutId);
+        const response = await fetch(fullUrl, {
+          ...mergedOptions,
+          signal: controller.signal
+        });
 
-      // Any HTTP response from the server (even 4xx/5xx) proves server connectivity
-      if (response.ok || response.status === 400 || response.status === 401 || response.status === 404 || response.status === 422) {
-        _cachedWorkingUrl = baseUrl;
+        clearTimeout(timeoutId);
+
+        // Standard successful or expected application responses
+        if (response.ok || response.status === 400 || response.status === 401 || response.status === 404 || response.status === 422) {
+          _cachedWorkingUrl = baseUrl;
+          return response;
+        }
+
+        // Render reverse proxy returns 502 Bad Gateway / 503 Service Unavailable / 504 Gateway Timeout while spinning up
+        if (response.status === 502 || response.status === 503 || response.status === 504) {
+          if (attempt < maxAttempts) {
+            console.log(`[NutriLens Cloud] Server waking up (HTTP ${response.status}). Retrying in 3.5s (attempt ${attempt}/${maxAttempts})...`);
+            await new Promise((resolve) => setTimeout(resolve, 3500));
+            continue;
+          } else {
+            throw new Error(`Cloud server is still spinning up (HTTP ${response.status}). Please tap '⚡ Retry Scan' in a few seconds.`);
+          }
+        }
+
+        // Other status codes (e.g. 500)
         return response;
+      } catch (err: any) {
+        lastError = err;
+        // If aborted or network dropped during cold start on first attempt, give container a moment and retry once
+        if (attempt < maxAttempts && (err?.name === "AbortError" || err?.message?.includes("fetch") || err?.message?.includes("network") || err?.message?.includes("Network"))) {
+          console.log(`[NutriLens Cloud] Connection interrupted during container startup. Retrying in 3s (attempt ${attempt}/${maxAttempts})...`);
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          continue;
+        }
       }
-    } catch (err: any) {
-      lastError = err;
     }
   }
 
