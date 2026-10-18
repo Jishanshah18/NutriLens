@@ -509,8 +509,8 @@ export default function ScannerScreen() {
       setScanStage("ANALYZING");
       setSimulationStageIndex(2);
 
-      // 65s safety timeout for cloud backend inference / cold start
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 65000));
+      // 85s safety timeout for cloud backend inference / cold start
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 85000));
 
       const response = await Promise.race([apiCall, timeoutPromise]);
 
@@ -522,7 +522,7 @@ export default function ScannerScreen() {
 
       if (!response) {
         setScanStage("IDLE");
-        setScanError("Scan analysis timed out while contacting backend. Please ensure the backend is running or tap 'Retry Scan'.");
+        setScanError("Scan analysis timed out while contacting cloud server. The hosted backend might be waking up from sleep. Tap '⚡ Retry Scan'.");
         return;
       }
 
@@ -568,7 +568,7 @@ export default function ScannerScreen() {
         rawMsg.includes("timeout")
       ) {
         setScanError(
-          `Backend connection issue (${getApiBaseUrl()}). For instant offline scans, run the local backend server (uvicorn main:app --port 8000). Tap 'Retry Scan' to try again.`
+          `Unable to connect to cloud backend (${getApiBaseUrl()}). The hosted server may be waking up. Tap '⚡ Retry Scan' in a few seconds.`
         );
       } else {
         setScanError(
@@ -1062,7 +1062,7 @@ export default function ScannerScreen() {
                   {scanError.toLowerCase().includes("backend") ||
                   scanError.toLowerCase().includes("connect") ||
                   scanError.toLowerCase().includes("network")
-                    ? "Backend Server Connection"
+                    ? "Cloud Server Connection"
                     : scanMode === "barcode"
                     ? "Barcode Not Detected"
                     : "Label Not Clearly Readable"}

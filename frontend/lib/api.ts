@@ -339,71 +339,31 @@ const FALLBACK_QUIZZES: QuizQuestion[] = [
 // Detect browser / dev environment
 const isBrowser = typeof window !== "undefined";
 const isHttpsBrowser = isBrowser && window.location?.protocol === "https:";
-const currentHostname = isBrowser ? (window.location?.hostname || "") : "";
-const isLocalhostEnv = isBrowser && (
-  currentHostname === "localhost" ||
-  currentHostname === "127.0.0.1" ||
-  currentHostname === "::1" ||
-  currentHostname.startsWith("192.168.") ||
-  currentHostname.startsWith("10.") ||
-  currentHostname.startsWith("172.")
-);
 
-const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
-const RENDER_CLOUD_URL = "https://nutrilens-jfiv.onrender.com/api";
+export const RENDER_CLOUD_URL = "https://nutrilens-jfiv.onrender.com/api";
+const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim() || RENDER_CLOUD_URL;
 
 export const getCandidateBaseUrls = (): string[] => {
-  const list: string[] = [];
-
-  // 1. If accessed over LAN (e.g. phone or browser on 192.168.x or 172.x), try host's local backend
-  if (isBrowser && currentHostname && currentHostname !== "localhost" && currentHostname !== "127.0.0.1") {
-    if (currentHostname.startsWith("192.168.") || currentHostname.startsWith("10.") || currentHostname.startsWith("172.")) {
-      list.push(`http://${currentHostname}:8000/api`);
-    }
-  }
-
-  // 2. In local dev environment: prioritize local backend (0 latency, offline capable)
-  if (isLocalhostEnv) {
-    list.push("http://127.0.0.1:8000/api");
-    list.push("http://localhost:8000/api");
-  }
-
-  // 3. Configured API URL and Cloud failover
-  if (CONFIGURED_API_URL && !list.includes(CONFIGURED_API_URL)) {
-    list.push(CONFIGURED_API_URL);
-  }
-  if (!list.includes(RENDER_CLOUD_URL)) {
-    list.push(RENDER_CLOUD_URL);
-  }
-
-  // 4. In production environments, add local backends as final fallback
-  if (!isLocalhostEnv) {
-    if (!list.includes("http://127.0.0.1:8000/api")) list.push("http://127.0.0.1:8000/api");
-    if (!list.includes("http://localhost:8000/api")) list.push("http://localhost:8000/api");
-  }
-
-  return list.filter(Boolean);
+  return [CONFIGURED_API_URL, RENDER_CLOUD_URL].filter(Boolean);
 };
 
 export const CANDIDATE_BASE_URLS: string[] = getCandidateBaseUrls();
 
-let _cachedWorkingUrl: string | null = null;
+let _cachedWorkingUrl: string | null = RENDER_CLOUD_URL;
 
 export const resetCachedWorkingUrl = () => {
-  _cachedWorkingUrl = null;
+  _cachedWorkingUrl = RENDER_CLOUD_URL;
 };
 
 export const getApiBaseUrl = (): string => {
-  if (_cachedWorkingUrl) return _cachedWorkingUrl;
-  const candidates = getCandidateBaseUrls();
-  return candidates[0] || RENDER_CLOUD_URL;
+  return RENDER_CLOUD_URL;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
 
 /**
- * Resilient API fetcher with automatic multi-endpoint failover and timeout control.
- * Ensures the app works seamlessly whether the local backend or cloud backend is responding.
+ * Resilient API fetcher for NutriLens Cloud Backend on Render.
+ * Supports generous timeout control to gracefully handle Render free container cold starts and inference.
  */
 export async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -428,17 +388,7 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
     headers: requestHeaders
   };
 
-  // Prioritize cached working URL if verified in current session
-  const urlsToTry: string[] = [];
-  if (_cachedWorkingUrl) {
-    urlsToTry.push(_cachedWorkingUrl);
-  }
-  for (const candidate of getCandidateBaseUrls()) {
-    const cleanCandidate = candidate.replace(/\/+$/, "");
-    if (!urlsToTry.includes(cleanCandidate)) {
-      urlsToTry.push(cleanCandidate);
-    }
-  }
+  const urlsToTry: string[] = [RENDER_CLOUD_URL];
 
   let lastError: any = null;
   const isImageOrScanEndpoint = (
@@ -452,12 +402,11 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
       const fullUrl = `${baseUrl}${cleanEndpoint}`;
       const controller = new AbortController();
 
-      // Cloud Render backend cold-starts / model loads can take 45-60s on free containers.
-      // Local backend (localhost/127.0.0.1) takes <2s, so allow up to 12s.
-      const isLocalUrl = baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost") || (currentHostname && baseUrl.includes(currentHostname));
+      // Cloud Render backend cold-starts / model loads can take 30-50s on free containers.
+      // Allow up to 80s for image OCR and ML classification so requests never get aborted prematurely.
       const timeoutMs = isImageOrScanEndpoint
-        ? (isLocalUrl ? 12000 : 65000)
-        : (options.method === "GET" ? 6000 : 15000);
+        ? 80000
+        : (options.method === "GET" ? 15000 : 25000);
 
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -475,14 +424,10 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
       }
     } catch (err: any) {
       lastError = err;
-      // If current cached URL failed, invalidate cache so failover activates
-      if (_cachedWorkingUrl === baseUrl) {
-        _cachedWorkingUrl = null;
-      }
     }
   }
 
-  throw lastError || new Error("Failed to connect to NutriLens backend service.");
+  throw lastError || new Error("Failed to connect to NutriLens cloud backend service.");
 }
 
 export interface BackendHealthResponse {
