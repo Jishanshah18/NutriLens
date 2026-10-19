@@ -346,17 +346,20 @@ const CONFIGURED_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
 export const getCandidateBaseUrls = (): string[] => {
   const candidates: string[] = [];
 
-  // 1. Explicit environment variable always takes precedence if configured
-  if (CONFIGURED_API_URL) {
-    candidates.push(CONFIGURED_API_URL.replace(/\/$/, ""));
-  }
-
-  // 2. Localhost detection: if running on local dev machine/browser, prioritize local backend
+  // 1. Localhost detection: when opening the web app on local machine, prioritize local FastAPI
   if (isBrowser && window.location) {
     const hostname = window.location.hostname;
     if (hostname === "localhost" || hostname === "127.0.0.1") {
       candidates.push("http://localhost:8000/api");
       candidates.push("http://127.0.0.1:8000/api");
+    }
+  }
+
+  // 2. Explicit environment variable (configured for Vercel / staging / production builds)
+  if (CONFIGURED_API_URL) {
+    const cleanConfig = CONFIGURED_API_URL.replace(/\/$/, "");
+    if (!candidates.includes(cleanConfig)) {
+      candidates.push(cleanConfig);
     }
   }
 
